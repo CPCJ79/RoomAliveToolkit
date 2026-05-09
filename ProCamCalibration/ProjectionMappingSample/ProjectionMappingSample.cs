@@ -195,21 +195,12 @@ namespace RoomAliveToolkit
 
                     if (localHeadTrackingEnabled)
                     {
-                        float distanceSquared = 0;
                         lock (headPositionLock)
                         {
                             headPosition = trackedHeadPosition;
-
-                            float dx = handLeftPosition.X - handRightPosition.X;
-                            float dy = handLeftPosition.Y - handRightPosition.Y;
-                            float dz = handLeftPosition.Z - handRightPosition.Z;
-                            distanceSquared = dx * dx + dy * dy + dz * dz;
                         }
                         var transform = Matrix4x4.CreateRotationY((float)Math.PI) * Matrix4x4.CreateTranslation(0, 0.45f, 0);
                         headPosition = Vector3.Transform(headPosition, transform);
-
-                        if (trackingValid && (distanceSquared < 0.02f) && (alpha > 1))
-                            alpha = 0;
                     }
 
                     var userView = GraphicsTransforms.LookAt(headPosition, headPosition + Vector3.UnitZ, Vector3.UnitY);
@@ -411,9 +402,7 @@ namespace RoomAliveToolkit
 
         // Head tracking state (to be populated by IDepthSensor-based tracking)
         Vector3 trackedHeadPosition = new Vector3(0f, 0.3f, 1.5f);
-        Vector3 handLeftPosition, handRightPosition;
         Object headPositionLock = new Object();
-        bool trackingValid = false;
 
 
 

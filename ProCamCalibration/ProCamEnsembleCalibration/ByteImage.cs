@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Runtime.Versioning;
 
 namespace RoomAliveToolkit
 {
@@ -32,6 +33,7 @@ namespace RoomAliveToolkit
             set { data[y * width + x] = value; }
         }
 
+        [SupportedOSPlatform("windows")]
         public Bitmap Bitmap()
         {
             Bitmap bitmap = new Bitmap(width, height, width, PixelFormat.Format8bppIndexed, DataIntPtr);

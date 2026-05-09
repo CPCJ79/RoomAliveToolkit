@@ -9,9 +9,6 @@
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\..\..\ProCamCalibration\ProCamEnsembleCalibration\ProCamEnsembleCalibrationLib.csproj" />
     <ProjectReference Include="..\ConsoleTextBox\ConsoleTextBox.csproj" />
   </ItemGroup>

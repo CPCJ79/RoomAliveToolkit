@@ -12,13 +12,14 @@
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
     <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
     <PackageReference Include="Grpc.Net.Client" Version="2.67.0" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.67.0" />
     <PackageReference Include="Google.Protobuf" Version="3.29.3" />
     <PackageReference Include="Grpc.Tools" Version="2.67.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\Proto\kinect_server.proto" GrpcServices="Client" Link="Proto\kinect_server.proto" />
-    <Protobuf Include="..\Proto\projector_server.proto" GrpcServices="Client" Link="Proto\projector_server.proto" />
+    <Protobuf Include="..\Proto\kinect_server.proto" GrpcServices="Both" Link="Proto\kinect_server.proto" />
+    <Protobuf Include="..\Proto\projector_server.proto" GrpcServices="Both" Link="Proto\projector_server.proto" />
   </ItemGroup>
 
 </Project>

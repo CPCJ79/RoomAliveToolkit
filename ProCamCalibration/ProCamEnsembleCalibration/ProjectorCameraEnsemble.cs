@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Xml;
 using System.Runtime.Serialization;
@@ -12,6 +13,7 @@ using System.Globalization;
 namespace RoomAliveToolkit
 {
     [DataContract]
+    [SupportedOSPlatform("windows")]
     public class ProjectorCameraEnsemble
     {
         [DataMember]
@@ -1421,6 +1423,7 @@ namespace RoomAliveToolkit
             mtlFileWriter.Close();
         }
    
+        [SupportedOSPlatform("windows")]
         static public void LoadFromTiff(UnmanagedImage image, string filename, int bytesPerPixel)
         {
             using (var bitmap = new Bitmap(filename))
@@ -1459,26 +1462,31 @@ namespace RoomAliveToolkit
             }
         }
 
+        [SupportedOSPlatform("windows")]
         static public void LoadFromTiff(ByteImage image, string filename)
         {
             LoadFromTiff(image, filename, 1);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void LoadFromTiff(ShortImage image, string filename)
         {
             LoadFromTiff(image, filename, 2);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void LoadFromTiff(ARGBImage image, string filename)
         {
             LoadFromTiff(image, filename, 4);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void LoadFromTiff(RGBImage image, string filename)
         {
             LoadFromTiff(image, filename, 3);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void SaveToTiff(UnmanagedImage image, string filename, PixelFormat pixelFormat, int bytesPerPixel)
         {
             using (var bitmap = new Bitmap(image.Width, image.Height, pixelFormat))
@@ -1518,16 +1526,19 @@ namespace RoomAliveToolkit
             }
         }
 
+        [SupportedOSPlatform("windows")]
         static public void SaveToTiff(ByteImage image, string filename)
         {
             SaveToTiff(image, filename, PixelFormat.Format8bppIndexed, 1);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void SaveToTiff(ShortImage image, string filename)
         {
             SaveToTiff(image, filename, PixelFormat.Format16bppGrayScale, 2);
         }
 
+        [SupportedOSPlatform("windows")]
         static public void SaveToTiff(ARGBImage image, string filename)
         {
             SaveToTiff(image, filename, PixelFormat.Format32bppArgb, 4);

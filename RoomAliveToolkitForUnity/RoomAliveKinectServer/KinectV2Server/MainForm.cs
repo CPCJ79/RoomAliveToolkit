@@ -63,8 +63,6 @@ namespace KinectV2Server
 
         public Float2Image depthFrameToCameraSpaceTable, depthFrameToCameraSpaceTableFlipped;
 
-        bool mRunningKinect = false;
-
         string backgroundFileName = "Background";
         int acquireBackgroundCounter = 0;
         PreProcessDepthMap_Variance preProcess;
@@ -286,7 +284,6 @@ namespace KinectV2Server
 
         private void StartSensorThreads()
         {
-            mRunningKinect = true;
             kinectTimer.Start();
 
             // Start depth frame acquisition thread
@@ -759,7 +756,6 @@ namespace KinectV2Server
 
 #region Color Processing
 
-        bool killProcessColorThread = false;
         private void ProcessColorImage()
         {
             while (settings.StreamColor)
@@ -793,8 +789,6 @@ namespace KinectV2Server
                 }
                 nextColorFrameReady.Set();
             }
-
-            killProcessColorThread = true;
 
             processColorThreadCompleted.Set();
         }

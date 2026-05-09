@@ -10,15 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Vortice.Direct2D1" Version="3.7.0" />
-    <PackageReference Include="Vortice.DirectX" Version="3.7.0" />
-    <PackageReference Include="Grpc.AspNetCore" Version="2.67.0" />
-    <PackageReference Include="Google.Protobuf" Version="3.29.3" />
-    <PackageReference Include="Grpc.Tools" Version="2.67.0" PrivateAssets="All" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Protobuf Include="..\Proto\projector_server.proto" GrpcServices="Server" Link="Proto\projector_server.proto" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.1" />
+    <PackageReference Include="Vortice.DirectX" Version="3.8.1" />
   </ItemGroup>
 
   <ItemGroup>
