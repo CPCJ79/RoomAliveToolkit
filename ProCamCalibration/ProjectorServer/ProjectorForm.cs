@@ -146,9 +146,9 @@ namespace RoomAliveToolkit
             renderTarget.EndDraw();
         }
 
-        protected override void OnClosed(EventArgs e)
+        protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            base.OnClosed(e);
+            base.OnFormClosed(e);
 
             bitmap.Dispose();
             renderTarget.Dispose();
