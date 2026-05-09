@@ -1,149 +1,100 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
-using SharpDX;
-using SharpDX.Direct3D11;
-using SharpDX.DXGI;
-using SharpDX.D3DCompiler;
-using Device = SharpDX.Direct3D11.Device;
+using Vortice.Direct3D11;
+using Vortice.DXGI;
+using Vortice.Mathematics;
+using System.Numerics;
 
 namespace RoomAliveToolkit
 {
     public class DepthAndColorShader
     {
-        public DepthAndColorShader(Device device)
+        public DepthAndColorShader(ID3D11Device device)
         {
-            shaderByteCode = new ShaderBytecode(File.ReadAllBytes("Content/DepthAndColorFloatVS.cso"));
-            depthAndColorVS = new VertexShader(device, shaderByteCode);
-            depthAndColorGS = new GeometryShader(device, new ShaderBytecode(File.ReadAllBytes("Content/DepthAndColorGS.cso")));
-            depthAndColorPS = new PixelShader(device, new ShaderBytecode(File.ReadAllBytes("Content/DepthAndColorPS.cso")));
+            shaderByteCode = File.ReadAllBytes("Content/DepthAndColorFloatVS.cso");
+            depthAndColorVS = device.CreateVertexShader(shaderByteCode);
+            depthAndColorGS = device.CreateGeometryShader(File.ReadAllBytes("Content/DepthAndColorGS.cso"));
+            depthAndColorPS = device.CreatePixelShader(File.ReadAllBytes("Content/DepthAndColorPS.cso"));
 
             // depth stencil state
-            var depthStencilStateDesc = new DepthStencilStateDescription()
+            var depthStencilStateDesc = new DepthStencilDescription()
             {
-                IsDepthEnabled = true,
+                DepthEnable = true,
                 DepthWriteMask = DepthWriteMask.All,
-                DepthComparison = Comparison.LessEqual,
-                IsStencilEnabled = false,
+                DepthFunc = ComparisonFunction.LessEqual,
+                StencilEnable = false,
             };
-            depthStencilState = new DepthStencilState(device, depthStencilStateDesc);
+            depthStencilState = device.CreateDepthStencilState(depthStencilStateDesc);
 
             // rasterizer state
-            var rasterizerStateDesc = new RasterizerStateDescription()
+            var rasterizerStateDesc = new RasterizerDescription()
             {
                 CullMode = CullMode.None,
                 FillMode = FillMode.Solid,
-                IsDepthClipEnabled = true,
-                IsFrontCounterClockwise = true,
-                IsMultisampleEnabled = true,
+                DepthClipEnable = true,
+                FrontCounterClockwise = true,
+                MultisampleEnable = true,
             };
-            rasterizerState = new RasterizerState(device, rasterizerStateDesc);
+            rasterizerState = device.CreateRasterizerState(rasterizerStateDesc);
 
             // color sampler state
-            var colorSamplerStateDesc = new SamplerStateDescription()
+            var colorSamplerStateDesc = new SamplerDescription()
             {
                 Filter = Filter.MinMagMipLinear,
                 AddressU = TextureAddressMode.Border,
                 AddressV = TextureAddressMode.Border,
                 AddressW = TextureAddressMode.Border,
-                //BorderColor = new SharpDX.Color4(0.5f, 0.5f, 0.5f, 1.0f),
-                BorderColor = new SharpDX.Color4(0, 0, 0, 1.0f),
+                //BorderColor = new Color4(0.5f, 0.5f, 0.5f, 1.0f),
+                BorderColor = new Color4(0, 0, 0, 1.0f),
             };
-            colorSamplerState = new SamplerState(device, colorSamplerStateDesc);
-
-            //// Kinect depth image
-            //var depthImageTextureDesc = new Texture2DDescription()
-            //{
-            //    Width = depthImageWidth,
-            //    Height = depthImageHeight,
-            //    MipLevels = 1,
-            //    ArraySize = 1,
-            //    Format = SharpDX.DXGI.Format.R16_UInt, // R32_Float
-            //    SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
-            //    Usage = ResourceUsage.Dynamic,
-            //    BindFlags = BindFlags.ShaderResource,
-            //    CpuAccessFlags = CpuAccessFlags.Write,
-            //};
-            //depthImageTexture = new Texture2D(device, depthImageTextureDesc);
-            //depthImageTextureRV = new ShaderResourceView(device, depthImageTexture);
+            colorSamplerState = device.CreateSamplerState(colorSamplerStateDesc);
 
             // filtered depth image
             var filteredDepthImageTextureDesc = new Texture2DDescription()
             {
-                Width = Kinect2Calibration.depthImageWidth * 3,
-                Height = Kinect2Calibration.depthImageHeight * 3,
+                Width = (uint)(Kinect2Calibration.depthImageWidth * 3),
+                Height = (uint)(Kinect2Calibration.depthImageHeight * 3),
                 MipLevels = 1,
                 ArraySize = 1,
-                Format = SharpDX.DXGI.Format.R32G32_Float,
-                SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
+                Format = Format.R32G32_Float,
+                SampleDescription = new SampleDescription(1, 0),
                 Usage = ResourceUsage.Default,
                 BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
-                CpuAccessFlags = CpuAccessFlags.None,
+                CPUAccessFlags = CpuAccessFlags.None,
             };
-            filteredDepthImageTexture = new Texture2D(device, filteredDepthImageTextureDesc);
-            filteredRenderTargetView = new RenderTargetView(device, filteredDepthImageTexture);
-            filteredDepthImageSRV = new ShaderResourceView(device, filteredDepthImageTexture);
+            filteredDepthImageTexture = device.CreateTexture2D(filteredDepthImageTextureDesc);
+            filteredRenderTargetView = device.CreateRenderTargetView(filteredDepthImageTexture);
+            filteredDepthImageSRV = device.CreateShaderResourceView(filteredDepthImageTexture);
 
-            filteredDepthImageTexture2 = new Texture2D(device, filteredDepthImageTextureDesc);
-            filteredRenderTargetView2 = new RenderTargetView(device, filteredDepthImageTexture2);
-            filteredDepthImageSRV2 = new ShaderResourceView(device, filteredDepthImageTexture2);
+            filteredDepthImageTexture2 = device.CreateTexture2D(filteredDepthImageTextureDesc);
+            filteredRenderTargetView2 = device.CreateRenderTargetView(filteredDepthImageTexture2);
+            filteredDepthImageSRV2 = device.CreateShaderResourceView(filteredDepthImageTexture2);
 
 
-
-            //// Kinect color image
-            //var colorImageStagingTextureDesc = new Texture2DDescription()
-            //{
-            //    Width = colorImageWidth,
-            //    Height = colorImageHeight,
-            //    MipLevels = 1,
-            //    ArraySize = 1,
-            //    Format = SharpDX.DXGI.Format.B8G8R8A8_UNorm,
-            //    //Format = SharpDX.DXGI.Format.YUY2
-            //    SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
-            //    Usage = ResourceUsage.Dynamic,
-            //    BindFlags = BindFlags.ShaderResource,
-            //    CpuAccessFlags = CpuAccessFlags.Write
-            //};
-            //colorImageStagingTexture = new Texture2D(device, colorImageStagingTextureDesc);
-
-            //var colorImageTextureDesc = new Texture2DDescription()
-            //{
-            //    Width = colorImageWidth,
-            //    Height = colorImageHeight,
-            //    MipLevels = 0,
-            //    ArraySize = 1,
-            //    Format = SharpDX.DXGI.Format.B8G8R8A8_UNorm,
-            //    SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
-            //    Usage = ResourceUsage.Default,
-            //    BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
-            //    CpuAccessFlags = CpuAccessFlags.None,
-            //    OptionFlags = ResourceOptionFlags.GenerateMipMaps
-            //};
-            //colorImageTexture = new Texture2D(device, colorImageTextureDesc);
-            //colorImageTextureRV = new ShaderResourceView(device, colorImageTexture);
 
             // constant buffer
             var constantBufferDesc = new BufferDescription()
             {
                 Usage = ResourceUsage.Dynamic,
                 BindFlags = BindFlags.ConstantBuffer,
-                SizeInBytes = ConstantBuffer.size,
-                CpuAccessFlags = CpuAccessFlags.Write,
+                ByteWidth = (uint)ConstantBuffer.size,
+                CPUAccessFlags = CpuAccessFlags.Write,
                 StructureByteStride = 0,
-                OptionFlags = 0,
+                MiscFlags = 0,
             };
-            constantBuffer = new SharpDX.Direct3D11.Buffer(device, constantBufferDesc);
+            constantBuffer = device.CreateBuffer(constantBufferDesc);
 
             bilateralFilter = new BilateralFilter(device, Kinect2Calibration.depthImageWidth, Kinect2Calibration.depthImageHeight);
 
-            vertexInputLayout = new InputLayout(device, shaderByteCode.Data, new[]
+            vertexInputLayout = device.CreateInputLayout(new[]
             {
-                new InputElement("SV_POSITION", 0, Format.R32G32B32A32_Float, 0, 0),
-            });
+                new InputElementDescription("SV_POSITION", 0, Format.R32G32B32A32_Float, 0, 0),
+            }, shaderByteCode);
 
         }
 
-        public static SharpDX.Direct3D11.Buffer CreateVertexBuffer(Device device, RoomAliveToolkit.Kinect2Calibration kinect2Calibration)
+        public static ID3D11Buffer CreateVertexBuffer(ID3D11Device device, RoomAliveToolkit.Kinect2Calibration kinect2Calibration)
         {
             // generate depthFrameToCameraSpace table
             var depthFrameToCameraSpaceTable = kinect2Calibration.ComputeDepthFrameToCameraSpaceTable(Kinect2Calibration.depthImageWidth, Kinect2Calibration.depthImageHeight);
@@ -154,12 +105,12 @@ namespace RoomAliveToolkit
 
             Int3[] quadOffsets = new Int3[]
             {
-                new Int3(0, 0, 0),  
-                new Int3(1, 0, 0),  
-                new Int3(0, 1, 0),  
-                new Int3(1, 0, 0),  
-                new Int3(1, 1, 0),  
-                new Int3(0, 1, 0),  
+                new Int3(0, 0, 0),
+                new Int3(1, 0, 0),
+                new Int3(0, 1, 0),
+                new Int3(1, 0, 0),
+                new Int3(1, 1, 0),
+                new Int3(0, 1, 0),
             };
 
             int vertexIndex = 0;
@@ -173,24 +124,18 @@ namespace RoomAliveToolkit
                         var point = depthFrameToCameraSpaceTable[Kinect2Calibration.depthImageWidth * vertexY + vertexX];
 
                         var vertex = new VertexPosition();
-                        vertex.position = new SharpDX.Vector4(point.X, point.Y, vertexX, vertexY);
+                        vertex.position = new Vector4(point.X, point.Y, vertexX, vertexY);
                         vertices[vertexIndex++] = vertex;
                     }
-
-            var stream = new DataStream(numVertices * VertexPosition.SizeInBytes, true, true);
-            stream.WriteRange(vertices);
-            stream.Position = 0;
 
             var vertexBufferDesc = new BufferDescription()
             {
                 BindFlags = BindFlags.VertexBuffer,
-                CpuAccessFlags = CpuAccessFlags.None,
+                CPUAccessFlags = CpuAccessFlags.None,
                 Usage = ResourceUsage.Default,
-                SizeInBytes = numVertices * VertexPosition.SizeInBytes,
+                ByteWidth = (uint)(numVertices * VertexPosition.SizeInBytes),
             };
-            var vertexBuffer = new SharpDX.Direct3D11.Buffer(device, stream, vertexBufferDesc);
-
-            stream.Dispose();
+            var vertexBuffer = device.CreateBuffer(vertices, vertexBufferDesc);
 
             return vertexBuffer;
         }
@@ -199,11 +144,11 @@ namespace RoomAliveToolkit
 
         struct VertexPosition
         {
-            public SharpDX.Vector4 position;
+            public Vector4 position;
             static public int SizeInBytes { get { return 4 * 4;  } }
         }
 
-        InputLayout vertexInputLayout;
+        ID3D11InputLayout vertexInputLayout;
 
         // protip: compile shader with /Fc; output gives exact layout
         // hlsl matrices are stored column major
@@ -229,7 +174,7 @@ namespace RoomAliveToolkit
         };
 
 
-        public unsafe void SetConstants(DeviceContext deviceContext, RoomAliveToolkit.Kinect2Calibration kinect2Calibration, SharpDX.Matrix projection)
+        public unsafe void SetConstants(ID3D11DeviceContext deviceContext, RoomAliveToolkit.Kinect2Calibration kinect2Calibration, Matrix4x4 projection)
         {
             // hlsl matrices are default column order
             var constants = new ConstantBuffer();
@@ -247,58 +192,46 @@ namespace RoomAliveToolkit
             constants.k1 = (float)kinect2Calibration.colorLensDistortion[0];
             constants.k2 = (float)kinect2Calibration.colorLensDistortion[1];
 
-            DataStream dataStream;
-            deviceContext.MapSubresource(constantBuffer, MapMode.WriteDiscard, SharpDX.Direct3D11.MapFlags.None, out dataStream);
-            dataStream.Write<ConstantBuffer>(constants);
-            deviceContext.UnmapSubresource(constantBuffer, 0);
+            var mapped = deviceContext.Map(constantBuffer, MapMode.WriteDiscard);
+            Marshal.StructureToPtr(constants, mapped.DataPointer, false);
+            deviceContext.Unmap(constantBuffer, 0);
 
         }
 
 
-        public void Render(DeviceContext deviceContext, ShaderResourceView depthImageTextureRV, ShaderResourceView colorImageTextureRV, SharpDX.Direct3D11.Buffer vertexBuffer, RenderTargetView renderTargetView, DepthStencilView depthStencilView, Viewport viewport)
+        public void Render(ID3D11DeviceContext deviceContext, ID3D11ShaderResourceView depthImageTextureRV, ID3D11ShaderResourceView colorImageTextureRV, ID3D11Buffer vertexBuffer, ID3D11RenderTargetView renderTargetView, ID3D11DepthStencilView depthStencilView, Viewport viewport)
         {
-            //bilateralFilter.Render(deviceContext, depthImageTextureRV, filteredRenderTargetView2);
-            //bilateralFilter.Render(deviceContext, filteredDepthImageSRV2, filteredRenderTargetView);
-            
-            //bilateralFilter.Render(deviceContext, filteredDepthImageSRV, filteredRenderTargetView2);
-            //bilateralFilter.Render(deviceContext, filteredDepthImageSRV2, filteredRenderTargetView);
-
-
-
-            deviceContext.InputAssembler.InputLayout = vertexInputLayout;
-            deviceContext.InputAssembler.PrimitiveTopology = SharpDX.Direct3D.PrimitiveTopology.TriangleList;
-            deviceContext.InputAssembler.SetVertexBuffers(0, new VertexBufferBinding(vertexBuffer, VertexPosition.SizeInBytes, 0)); // bytes per vertex
-            deviceContext.Rasterizer.State = rasterizerState;
-            deviceContext.Rasterizer.SetViewport(viewport);
-            deviceContext.VertexShader.Set(depthAndColorVS);
-            deviceContext.VertexShader.SetShaderResource(0, depthImageTextureRV);
-            //deviceContext.VertexShader.SetShaderResource(0, depthAndMaskRV);
-            //deviceContext.VertexShader.SetShaderResource(0, filteredDepthImageSRV);
-            deviceContext.VertexShader.SetConstantBuffer(0, constantBuffer);
-            deviceContext.GeometryShader.Set(depthAndColorGS);
-            deviceContext.PixelShader.Set(depthAndColorPS);
-            deviceContext.PixelShader.SetShaderResource(0, colorImageTextureRV);
-            deviceContext.PixelShader.SetSampler(0, colorSamplerState);
-            deviceContext.OutputMerger.SetTargets(depthStencilView, renderTargetView);
-            deviceContext.OutputMerger.DepthStencilState = depthStencilState;
+            deviceContext.IASetInputLayout(vertexInputLayout);
+            deviceContext.IASetPrimitiveTopology(Vortice.Direct3D.PrimitiveTopology.TriangleList);
+            deviceContext.IASetVertexBuffer(0, vertexBuffer, (uint)VertexPosition.SizeInBytes); // bytes per vertex
+            deviceContext.RSSetState(rasterizerState);
+            deviceContext.RSSetViewport(viewport);
+            deviceContext.VSSetShader(depthAndColorVS);
+            deviceContext.VSSetShaderResource(0, depthImageTextureRV);
+            deviceContext.VSSetConstantBuffer(0, constantBuffer);
+            deviceContext.GSSetShader(depthAndColorGS);
+            deviceContext.PSSetShader(depthAndColorPS);
+            deviceContext.PSSetShaderResource(0, colorImageTextureRV);
+            deviceContext.PSSetSampler(0, colorSamplerState);
+            deviceContext.OMSetRenderTargets(renderTargetView, depthStencilView);
+            deviceContext.OMSetDepthStencilState(depthStencilState);
             deviceContext.Draw((Kinect2Calibration.depthImageWidth - 1) * (Kinect2Calibration.depthImageHeight - 1) * 6, 0);
         }
 
-        VertexShader depthAndColorVS;
-        GeometryShader depthAndColorGS;
-        PixelShader depthAndColorPS;
-        ShaderBytecode shaderByteCode;
-        DepthStencilState depthStencilState;
-        RasterizerState rasterizerState;
-        SamplerState colorSamplerState;
-        SharpDX.Direct3D11.Buffer constantBuffer; 
+        ID3D11VertexShader depthAndColorVS;
+        ID3D11GeometryShader depthAndColorGS;
+        ID3D11PixelShader depthAndColorPS;
+        byte[] shaderByteCode;
+        ID3D11DepthStencilState depthStencilState;
+        ID3D11RasterizerState rasterizerState;
+        ID3D11SamplerState colorSamplerState;
+        ID3D11Buffer constantBuffer;
         BilateralFilter bilateralFilter;
-        //FromUIntPS fromUIntPS;
-        Texture2D filteredDepthImageTexture, filteredDepthImageTexture2;
-        RenderTargetView filteredRenderTargetView, filteredRenderTargetView2;
-        ShaderResourceView filteredDepthImageSRV, filteredDepthImageSRV2;
+        ID3D11Texture2D filteredDepthImageTexture, filteredDepthImageTexture2;
+        ID3D11RenderTargetView filteredRenderTargetView, filteredRenderTargetView2;
+        ID3D11ShaderResourceView filteredDepthImageSRV, filteredDepthImageSRV2;
     }
 
-   
+
 
 }

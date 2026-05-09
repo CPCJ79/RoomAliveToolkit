@@ -1,84 +1,71 @@
-﻿using System;
-using Microsoft.Kinect;
+using System;
+using System.Runtime.InteropServices;
 
 namespace RoomAliveToolkit
 {
     public class CoordinateMappingExample
     {
         /// <summary>
-        /// Demonstrates how to use our Kinect calibration to convert a depth image point to color image coordinates.
+        /// Demonstrates how to use our sensor calibration to convert a depth image point to color image coordinates.
+        /// Uses the IDepthSensor abstraction instead of Kinect SDK directly.
         /// </summary>
-        /// <param name="calibration"></param>
-        /// <param name="kinectSensor"></param>
-        public void Run(Kinect2Calibration calibration, KinectSensor kinectSensor)
+        /// <param name="calibration">The sensor's calibration data.</param>
+        /// <param name="sensor">The depth sensor to acquire frames from.</param>
+        public void Run(SensorCalibration calibration, IDepthSensor sensor)
         {
             this.calibration = calibration;
-            this.kinectSensor = kinectSensor;
-            depthImage = new ShortImage(Kinect2Calibration.depthImageWidth, Kinect2Calibration.depthImageHeight);
-            depthFrameReader = kinectSensor.DepthFrameSource.OpenReader();
-            depthFrameReader.FrameArrived += depthFrameReader_FrameArrived;
-        
-        }
+            this.sensor = sensor;
 
-        DepthFrameReader depthFrameReader;
-        ShortImage depthImage;
-        Kinect2Calibration calibration;
-        KinectSensor kinectSensor;
+            int depthWidth = calibration.DepthImageWidth;
+            int depthHeight = calibration.DepthImageHeight;
 
-        void depthFrameReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
-        {
-            var depthFrame = e.FrameReference.AcquireFrame();
-            if (depthFrame != null)
+            depthImage = new ShortImage(depthWidth, depthHeight);
+
+            // Poll for a single depth frame and demonstrate coordinate mapping
+            byte[] depthBytes = sensor.AcquireDepthFrame();
+            if (depthBytes == null)
             {
-                using (depthFrame)
-                {
-                    depthFrame.CopyFrameDataToIntPtr(depthImage.DataIntPtr, Kinect2Calibration.depthImageWidth*Kinect2Calibration.depthImageHeight*2);
-
-                    // convert depth image coords to color image coords
-                    int x = 100, y = 100;
-                    ushort depthImageValue = depthImage[x, y]; // depth image values are in mm
-
-                    if (depthImageValue == 0)
-                    {
-                        Console.WriteLine("Sorry, depth value input coordinates is zero");
-                        return;
-                    }
-
-                    float depth = (float)depthImageValue / 1000f; // convert to m, to match our calibration and the rest of the Kinect SDK
-                    double colorX, colorY;
-                    calibration.DepthImageToColorImage(x, y, depth, out colorX, out colorY);
-
-                    //// when converting many points, it may be faster to precompute pass in the distortion table:
-                    //var depthFrameToCameraSpaceTable = calibration.ComputeDepthFrameToCameraSpaceTable();
-                    //calibration.DepthImageToColorImage(x, y, depth, depthFrameToCameraSpaceTable, out colorX, out colorY);
-
-                    Console.WriteLine("our color coordinates: {0} {1}", colorX, colorY);
-
-                    // compare to Kinect SDK
-                    var depthSpacePoint = new DepthSpacePoint();
-                    depthSpacePoint.X = x;
-                    depthSpacePoint.Y = y;
-                    var colorSpacePoint = kinectSensor.CoordinateMapper.MapDepthPointToColorSpace(depthSpacePoint, depthImageValue);
-                    Console.WriteLine("SDK's color coordinates: {0} {1}", colorSpacePoint.X, colorSpacePoint.Y);
-
-                    // convert back to depth image
-                    Matrix depthPoint;
-                    double depthX, depthY;
-
-                    calibration.ColorImageToDepthImage(colorX, colorY, depthImage, out depthPoint, out depthX, out depthY);
-
-                    //// when converting many points, it may be faster to precompute and pass in the distortion table:
-                    //var colorFrameToCameraSapceTable = calibration.ComputeColorFrameToCameraSpaceTable();
-                    //calibration.ColorImageToDepthImage((int)colorX, (int)colorY, depthImage, colorFrameToCameraSapceTable, out depthPoint, out depthX, out depthY);
-
-                    Console.WriteLine("convert back to depth: {0} {1}", depthX, depthY);
-                }
+                Console.WriteLine("Failed to acquire depth frame.");
+                return;
             }
 
-        
-        
+            Marshal.Copy(depthBytes, 0, depthImage.DataIntPtr, depthWidth * depthHeight * 2);
+
+            // Convert depth image coords to color image coords
+            int x = 100, y = 100;
+            ushort depthImageValue = depthImage[x, y]; // depth image values are in mm
+
+            if (depthImageValue == 0)
+            {
+                Console.WriteLine("Sorry, depth value at input coordinates is zero");
+                return;
+            }
+
+            float depth = (float)depthImageValue / 1000f; // convert to m
+
+            // Use calibration to map depth pixel to color pixel
+            // Note: if calibration is a Kinect2Calibration, the same DepthImageToColorImage
+            // method is available on the subclass.
+            if (calibration is Kinect2Calibration kinect2Cal)
+            {
+                double colorX, colorY;
+                kinect2Cal.DepthImageToColorImage(x, y, depth, out colorX, out colorY);
+                Console.WriteLine("our color coordinates: {0} {1}", colorX, colorY);
+
+                // Convert back to depth image
+                Matrix depthPoint;
+                double depthX, depthY;
+                kinect2Cal.ColorImageToDepthImage(colorX, colorY, depthImage, out depthPoint, out depthX, out depthY);
+                Console.WriteLine("convert back to depth: {0} {1}", depthX, depthY);
+            }
+            else
+            {
+                Console.WriteLine("Coordinate mapping demo requires Kinect2Calibration (or equivalent) for DepthImageToColorImage.");
+            }
         }
 
-
+        ShortImage depthImage;
+        SensorCalibration calibration;
+        IDepthSensor sensor;
     }
 }

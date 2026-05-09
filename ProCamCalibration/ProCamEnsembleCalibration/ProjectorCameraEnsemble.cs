@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.ServiceModel;
 using System.Text;
 using System.Xml;
 using System.Runtime.Serialization;
@@ -38,24 +39,9 @@ namespace RoomAliveToolkit
             {
                 get
                 {
-                    if ((client == null) || (client.InnerChannel.State != CommunicationState.Opened))
+                    if (client == null)
                     {
-                        var binding = new NetTcpBinding();
-                        binding.MaxReceivedMessageSize = 8295424;
-                        binding.Security.Mode = SecurityMode.None;
-                        var uri = "net.tcp://" + hostNameOrAddress + ":9000/KinectServer2/service";
-                        var address = new EndpointAddress(uri);
-                        client = new KinectServer2Client(binding, address);
-                        try
-                        {
-                            client.Open();
-                        }
-                        catch (EndpointNotFoundException e)
-                        {
-                            client = null;
-                            Console.WriteLine("could not connect to Kinect server '{0}' at '{1}'", name, hostNameOrAddress);
-                            throw e;
-                        }
+                        client = new KinectServer2Client(hostNameOrAddress, 9000);
                     }
                     return client;
                 }
@@ -89,23 +75,9 @@ namespace RoomAliveToolkit
             {
                 get
                 {
-                    if ((client == null) || (client.InnerChannel.State != CommunicationState.Opened))
+                    if (client == null)
                     {
-                        var binding = new NetTcpBinding();
-                        binding.Security.Mode = SecurityMode.None;
-                        var uri = "net.tcp://" + hostNameOrAddress + ":9001/ProjectorServer/service";
-                        var address = new EndpointAddress(uri);
-                        client = new ProjectorServerClient(binding, address);
-                        try
-                        {
-                            client.Open();
-                        }
-                        catch (EndpointNotFoundException e)
-                        {
-                            client = null;
-                            Console.WriteLine("could not connect to projector server '{0}' at '{1}'", name, hostNameOrAddress);
-                            throw e;
-                        }
+                        client = new ProjectorServerClient(hostNameOrAddress, 9001);
                     }
                     return client;
                 }
@@ -158,7 +130,6 @@ namespace RoomAliveToolkit
             }
             name = "Untitled";
 
-            imagingFactory = new SharpDX.WIC.ImagingFactory();
             stopWatch = new System.Diagnostics.Stopwatch();
         }
 
@@ -173,14 +144,12 @@ namespace RoomAliveToolkit
             return room;
         }
 
-        public SharpDX.WIC.ImagingFactory imagingFactory;
         System.Diagnostics.Stopwatch stopWatch;
 
         // DataContractSerializer does not call a constructor or field initializers on deserialization.
         [OnDeserialized]
         void OnDeserialized(StreamingContext c)
         {
-            imagingFactory = new SharpDX.WIC.ImagingFactory();
             stopWatch = new System.Diagnostics.Stopwatch();
         }
 
@@ -237,7 +206,7 @@ namespace RoomAliveToolkit
             //    var colorBytes = camera.Client.LatestRGBImage();
             //    var image = new ARGBImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
             //    Marshal.Copy(colorBytes, 0, image.DataIntPtr, Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4);
-            //    SaveToTiff(imagingFactory, image, cameraDirectory + "/projectorLabels.tiff");
+            //    SaveToTiff(image, cameraDirectory + "/projectorLabels.tiff");
             //    image.Dispose();
             //}
 
@@ -301,7 +270,7 @@ namespace RoomAliveToolkit
                                 grayImage[x, y] = colorImageBytes[2 * (Kinect2Calibration.colorImageWidth * y + x)];
 
                         // save to file
-                        SaveToTiff(imagingFactory, grayImage, cameraDirectory + "/grayCode" + i + ".tiff");
+                        SaveToTiff(grayImage, cameraDirectory + "/grayCode" + i + ".tiff");
                     }
                 }
                 projector.Client.SetColor(projector.displayIndex, 0, 0, 0);
@@ -377,7 +346,7 @@ namespace RoomAliveToolkit
                 for (int y = 0; y < Kinect2Calibration.depthImageHeight; y++)
                     for (int x = 0; x < Kinect2Calibration.depthImageWidth; x++)
                         meanDepthShortImage[x, y] = (ushort)meanImage[x, y];
-                SaveToTiff(imagingFactory, meanDepthShortImage, cameraDirectory + "/mean.tiff");
+                SaveToTiff(meanDepthShortImage, cameraDirectory + "/mean.tiff");
 
                 // convert to world coordinates and save to ply file
                 camera.calibration = camera.Client.GetCalibration();
@@ -420,7 +389,7 @@ namespace RoomAliveToolkit
                 var colorBytes = camera.Client.LatestRGBImage();
                 var image = new ARGBImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
                 Marshal.Copy(colorBytes, 0, image.DataIntPtr, Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4);
-                SaveToTiff(imagingFactory, image, cameraDirectory + "/color.tiff");
+                SaveToTiff(image, cameraDirectory + "/color.tiff");
                 image.Dispose();
 
             }
@@ -461,7 +430,7 @@ namespace RoomAliveToolkit
 
                     // load and decode Gray code images
                     for (int i = 0; i < nCapturedImages; i++)
-                        LoadFromTiff(imagingFactory, capturedImages[i], cameraDirectory + "/grayCode" + i + ".tiff");
+                        LoadFromTiff(capturedImages[i], cameraDirectory + "/grayCode" + i + ".tiff");
 
                     var decodedColumns = new ShortImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
                     var decodedRows = new ShortImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
@@ -472,9 +441,9 @@ namespace RoomAliveToolkit
 
                     //Console.WriteLine("saving camera " + camera.displayName);
 
-                    SaveToTiff(imagingFactory, decodedColumns, cameraDirectory + "/decodedColumns.tiff");
-                    SaveToTiff(imagingFactory, decodedRows, cameraDirectory + "/decodedRows.tiff");
-                    SaveToTiff(imagingFactory, mask, cameraDirectory + "/mask.tiff");
+                    SaveToTiff(decodedColumns, cameraDirectory + "/decodedColumns.tiff");
+                    SaveToTiff(decodedRows, cameraDirectory + "/decodedRows.tiff");
+                    SaveToTiff(mask, cameraDirectory + "/mask.tiff");
 
 
                     var decodedColumnsMasked = new ShortImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
@@ -494,8 +463,8 @@ namespace RoomAliveToolkit
                                 decodedRowsMasked[x, y] = 0;
                             }
                         }
-                    SaveToTiff(imagingFactory, decodedColumnsMasked, cameraDirectory + "/decodedColumnsMasked.tiff");
-                    SaveToTiff(imagingFactory, decodedRowsMasked, cameraDirectory + "/decodedRowsMasked.tiff");
+                    SaveToTiff(decodedColumnsMasked, cameraDirectory + "/decodedColumnsMasked.tiff");
+                    SaveToTiff(decodedRowsMasked, cameraDirectory + "/decodedRowsMasked.tiff");
                 }
             }
 
@@ -579,7 +548,7 @@ namespace RoomAliveToolkit
                         }
                         
                     }
-                SaveToTiff(imagingFactory, validMask, cameraDirectory + "/validMask.tiff");
+                SaveToTiff(validMask, cameraDirectory + "/validMask.tiff");
 
                 Console.WriteLine("rejected " + 100 * (float)numRejected / (float)(Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight) + "% pixels for high variance");
 
@@ -606,9 +575,9 @@ namespace RoomAliveToolkit
                     var decodedRows = new ShortImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
                     var mask = new ByteImage(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
 
-                    LoadFromTiff(imagingFactory, decodedColumns, cameraDirectory + "/decodedColumns.tiff");
-                    LoadFromTiff(imagingFactory, decodedRows, cameraDirectory + "/decodedRows.tiff");
-                    LoadFromTiff(imagingFactory, mask, cameraDirectory + "/mask.tiff");
+                    LoadFromTiff(decodedColumns, cameraDirectory + "/decodedColumns.tiff");
+                    LoadFromTiff(decodedRows, cameraDirectory + "/decodedRows.tiff");
+                    LoadFromTiff(mask, cameraDirectory + "/mask.tiff");
 
                     // we have a bunch of color camera / depth camera point corrspondences
                     // use the Gray code to find the position of the color camera point in the projector frame
@@ -1452,70 +1421,116 @@ namespace RoomAliveToolkit
             mtlFileWriter.Close();
         }
    
-        static public void LoadFromTiff(SharpDX.WIC.ImagingFactory imagingFactory, UnmanagedImage image, string filename, int bytesPerPixel)
+        static public void LoadFromTiff(UnmanagedImage image, string filename, int bytesPerPixel)
         {
-            // TODO: this function is more generic; rewrite to handle different formats/bytesPerPixel
-            var decoder = new SharpDX.WIC.BitmapDecoder(imagingFactory, filename, SharpDX.WIC.DecodeOptions.CacheOnLoad);
-            var bitmapFrameDecode = decoder.GetFrame(0);
-            bitmapFrameDecode.CopyPixels(image.Width * bytesPerPixel, image.DataIntPtr, image.Width * image.Height * bytesPerPixel);
-            bitmapFrameDecode.Dispose();
-            decoder.Dispose();
+            using (var bitmap = new Bitmap(filename))
+            {
+                var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                var bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+                try
+                {
+                    int srcStride = bitmapData.Stride;
+                    int dstStride = image.Width * bytesPerPixel;
+                    if (srcStride == dstStride)
+                    {
+                        int totalBytes = image.Width * image.Height * bytesPerPixel;
+                        unsafe
+                        {
+                            Buffer.MemoryCopy((void*)bitmapData.Scan0, (void*)image.DataIntPtr, totalBytes, totalBytes);
+                        }
+                    }
+                    else
+                    {
+                        for (int y = 0; y < image.Height; y++)
+                        {
+                            IntPtr srcRow = IntPtr.Add(bitmapData.Scan0, y * srcStride);
+                            IntPtr dstRow = IntPtr.Add(image.DataIntPtr, y * dstStride);
+                            unsafe
+                            {
+                                Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, dstStride, dstStride);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    bitmap.UnlockBits(bitmapData);
+                }
+            }
         }
 
-        static public void LoadFromTiff(SharpDX.WIC.ImagingFactory imagingFactory, ByteImage image, string filename)
+        static public void LoadFromTiff(ByteImage image, string filename)
         {
-            LoadFromTiff(imagingFactory, image, filename, 1);
+            LoadFromTiff(image, filename, 1);
         }
 
-        static public void LoadFromTiff(SharpDX.WIC.ImagingFactory imagingFactory, ShortImage image, string filename)
+        static public void LoadFromTiff(ShortImage image, string filename)
         {
-            LoadFromTiff(imagingFactory, image, filename, 2);
+            LoadFromTiff(image, filename, 2);
         }
 
-        static public void LoadFromTiff(SharpDX.WIC.ImagingFactory imagingFactory, ARGBImage image, string filename)
+        static public void LoadFromTiff(ARGBImage image, string filename)
         {
-            LoadFromTiff(imagingFactory, image, filename, 4);
+            LoadFromTiff(image, filename, 4);
         }
 
-        static public void LoadFromTiff(SharpDX.WIC.ImagingFactory imagingFactory, RGBImage image, string filename)
+        static public void LoadFromTiff(RGBImage image, string filename)
         {
-            LoadFromTiff(imagingFactory, image, filename, 3);
+            LoadFromTiff(image, filename, 3);
         }
 
-        static public void SaveToTiff(SharpDX.WIC.ImagingFactory imagingFactory, UnmanagedImage image, string filename, Guid format, int bytesPerPixel)
+        static public void SaveToTiff(UnmanagedImage image, string filename, PixelFormat pixelFormat, int bytesPerPixel)
         {
-            var file = new System.IO.FileStream(filename, System.IO.FileMode.Create);
-            var stream = new SharpDX.WIC.WICStream(imagingFactory, file);
-            var encoder = new SharpDX.WIC.BitmapEncoder(imagingFactory, SharpDX.WIC.ContainerFormatGuids.Tiff);
-            encoder.Initialize(stream);
-            var bitmapFrameEncode = new SharpDX.WIC.BitmapFrameEncode(encoder);
-            //bitmapFrameEncode.Options.TiffCompressionMethod = SharpDX.WIC.TiffCompressionOption.None;
-            bitmapFrameEncode.Initialize();
-            bitmapFrameEncode.SetSize(image.Width, image.Height);
-            bitmapFrameEncode.SetPixelFormat(ref format);
-            bitmapFrameEncode.WritePixels(image.Height, image.DataIntPtr, image.Width * bytesPerPixel);
-            bitmapFrameEncode.Commit();
-            encoder.Commit();
-            bitmapFrameEncode.Dispose();
-            encoder.Dispose();
-            stream.Dispose();
-            file.Close();
-            file.Dispose();
+            using (var bitmap = new Bitmap(image.Width, image.Height, pixelFormat))
+            {
+                var rect = new Rectangle(0, 0, image.Width, image.Height);
+                var bitmapData = bitmap.LockBits(rect, ImageLockMode.WriteOnly, pixelFormat);
+                try
+                {
+                    int srcStride = image.Width * bytesPerPixel;
+                    int dstStride = bitmapData.Stride;
+                    if (srcStride == dstStride)
+                    {
+                        int totalBytes = image.Width * image.Height * bytesPerPixel;
+                        unsafe
+                        {
+                            Buffer.MemoryCopy((void*)image.DataIntPtr, (void*)bitmapData.Scan0, totalBytes, totalBytes);
+                        }
+                    }
+                    else
+                    {
+                        for (int y = 0; y < image.Height; y++)
+                        {
+                            IntPtr srcRow = IntPtr.Add(image.DataIntPtr, y * srcStride);
+                            IntPtr dstRow = IntPtr.Add(bitmapData.Scan0, y * dstStride);
+                            unsafe
+                            {
+                                Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, dstStride, srcStride);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    bitmap.UnlockBits(bitmapData);
+                }
+                bitmap.Save(filename, ImageFormat.Tiff);
+            }
         }
 
-        static public void SaveToTiff(SharpDX.WIC.ImagingFactory imagingFactory, ByteImage image, string filename)
+        static public void SaveToTiff(ByteImage image, string filename)
         {
-            SaveToTiff(imagingFactory, image, filename, SharpDX.WIC.PixelFormat.Format8bppGray, 1);
+            SaveToTiff(image, filename, PixelFormat.Format8bppIndexed, 1);
         }
 
-        static public void SaveToTiff(SharpDX.WIC.ImagingFactory imagingFactory, ShortImage image, string filename)
+        static public void SaveToTiff(ShortImage image, string filename)
         {
-            SaveToTiff(imagingFactory, image, filename, SharpDX.WIC.PixelFormat.Format16bppGray, 2);
+            SaveToTiff(image, filename, PixelFormat.Format16bppGrayScale, 2);
         }
 
-        static public void SaveToTiff(SharpDX.WIC.ImagingFactory imagingFactory, ARGBImage image, string filename)
+        static public void SaveToTiff(ARGBImage image, string filename)
         {
-            SaveToTiff(imagingFactory, image, filename, SharpDX.WIC.PixelFormat.Format32bppRGBA, 4);
+            SaveToTiff(image, filename, PixelFormat.Format32bppArgb, 4);
         }
 
         static public void SaveToPly(string filename, Float3Image pts3D)

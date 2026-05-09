@@ -1,5 +1,7 @@
-﻿using SharpDX;
+using Vortice.Direct3D11;
+using Vortice.Mathematics;
 using System;
+using System.Numerics;
 using System.Windows.Forms;
 
 namespace RoomAliveToolkit
@@ -12,7 +14,7 @@ namespace RoomAliveToolkit
     /// W, A, S, D, E, and C keys translate in X, Y and Z.
     /// Mouse click and drag rotates around X and Y.
     /// Holding down the ctrl key while dragging rotates around Z.
-    /// Holding down the shift key while dragging translates in X and Y. 
+    /// Holding down the shift key while dragging translates in X and Y.
     /// Mouse wheel translates along Z.
     /// R key resets to a designated 'original view'.
     /// </summary>
@@ -36,20 +38,20 @@ namespace RoomAliveToolkit
         /// <summary>
         /// Post-multiply view matrix.
         /// </summary>
-        public SharpDX.Matrix View
+        public Matrix4x4 View
         {
             get { return view; }
             set
             {
                 // get orientation from view matrix
                 orientation = value;
-                orientation.TranslationVector = Vector3.Zero;
+                orientation.Translation = Vector3.Zero;
 
                 // get position from view matrix
                 var invR = value;
-                invR.TranslationVector = Vector3.Zero;
-                invR.Transpose();
-                position = -(value * invR).TranslationVector;
+                invR.Translation = Vector3.Zero;
+                invR = Matrix4x4.Transpose(invR);
+                position = -(value * invR).Translation;
 
                 UpdateViewMatrix();
             }
@@ -58,12 +60,12 @@ namespace RoomAliveToolkit
         /// <summary>
         /// Post-multiply view matrix which is set when user hits R key.
         /// </summary>
-        public SharpDX.Matrix OriginalView;
+        public Matrix4x4 OriginalView;
 
         /// <summary>
         /// Post-multiply projection matrix.
         /// </summary>
-        public SharpDX.Matrix Projection;
+        public Matrix4x4 Projection;
 
         /// <summary>
         /// Viewport associated with the control.
@@ -89,7 +91,7 @@ namespace RoomAliveToolkit
         /// Game loop update.
         /// </summary>
         /// <returns>Updated view matrix.</returns>
-        public SharpDX.Matrix Update()
+        public Matrix4x4 Update()
         {
             long now = stopwatch.ElapsedTicks;
             if (mouseOver)
@@ -104,15 +106,34 @@ namespace RoomAliveToolkit
 
         void UpdateViewMatrix()
         {
-            view = SharpDX.Matrix.Translation(-position) * orientation;
+            view = Matrix4x4.CreateTranslation(-position) * orientation;
         }
 
         void Translate(Vector3 dir, float step)
         {
             var invR = orientation;
-            invR.Transpose();
-            position += step * Vector3.TransformCoordinate(dir, invR);
+            invR = Matrix4x4.Transpose(invR);
+            position += step * Vector3.TransformNormal(dir, invR);
             UpdateViewMatrix();
+        }
+
+        // Unproject helper: given screen coordinates, returns a direction vector in world space
+        Vector3 Unproject(Vector3 screenPos, Matrix4x4 proj, Matrix4x4 viewMat, Matrix4x4 worldMat)
+        {
+            // Transform from viewport to NDC
+            float x = (screenPos.X - Viewport.X) / Viewport.Width * 2f - 1f;
+            float y = 1f - (screenPos.Y - Viewport.Y) / Viewport.Height * 2f;
+            float z = screenPos.Z;
+
+            var ndc = new Vector3(x, y, z);
+
+            // Build combined WVP and invert
+            var wvp = worldMat * viewMat * proj;
+            Matrix4x4.Invert(wvp, out var invWVP);
+
+            var result = Vector3.Transform(ndc, invWVP);
+            // Perspective divide handled by Vector3.Transform for Matrix4x4
+            return result;
         }
 
         void Update(float dt)
@@ -162,14 +183,14 @@ namespace RoomAliveToolkit
                         startMousePosition = lastMousePosition;
                     }
 
-                    var centerRay = Viewport.Unproject(new Vector3((float)Viewport.Width / 2f, (float)Viewport.Height / 2f, 0), Projection, orientation, SharpDX.Matrix.Identity);
-                    centerRay.Normalize();
+                    var centerRay = Unproject(new Vector3((float)Viewport.Width / 2f, (float)Viewport.Height / 2f, 0), Projection, orientation, Matrix4x4.Identity);
+                    centerRay = Vector3.Normalize(centerRay);
 
-                    var startRay = Viewport.Unproject(new Vector3(startMousePosition.X, startMousePosition.Y, 0), Projection, orientation, SharpDX.Matrix.Identity);
-                    startRay.Normalize();
+                    var startRay = Unproject(new Vector3(startMousePosition.X, startMousePosition.Y, 0), Projection, orientation, Matrix4x4.Identity);
+                    startRay = Vector3.Normalize(startRay);
 
-                    var endRay = Viewport.Unproject(new Vector3(mousePosition.X, mousePosition.Y, 0), Projection, orientation, SharpDX.Matrix.Identity);
-                    endRay.Normalize();
+                    var endRay = Unproject(new Vector3(mousePosition.X, mousePosition.Y, 0), Projection, orientation, Matrix4x4.Identity);
+                    endRay = Vector3.Normalize(endRay);
 
                     float startScale = ShiftTranslationSpeed / Vector3.Dot(centerRay, startRay);
                     float endScale = ShiftTranslationSpeed / Vector3.Dot(centerRay, endRay);
@@ -189,20 +210,22 @@ namespace RoomAliveToolkit
                         startMousePosition = lastMousePosition;
                     }
 
-                    SharpDX.Matrix dR;
+                    Matrix4x4 dR;
 
                     if (rotateXY)
                     {
-                        var startRay = Viewport.Unproject(new Vector3(startMousePosition.X, startMousePosition.Y, 0), Projection, startOrientation, SharpDX.Matrix.Identity);
-                        startRay.Normalize();
+                        var startRay = Unproject(new Vector3(startMousePosition.X, startMousePosition.Y, 0), Projection, startOrientation, Matrix4x4.Identity);
+                        startRay = Vector3.Normalize(startRay);
 
-                        var endRay = Viewport.Unproject(new Vector3(mousePosition.X, mousePosition.Y, 0), Projection, startOrientation, SharpDX.Matrix.Identity);
-                        endRay.Normalize();
+                        var endRay = Unproject(new Vector3(mousePosition.X, mousePosition.Y, 0), Projection, startOrientation, Matrix4x4.Identity);
+                        endRay = Vector3.Normalize(endRay);
 
-                        float angle = (float)Math.Acos(Vector3.Dot(startRay, endRay));
+                        float dot = Vector3.Dot(startRay, endRay);
+                        dot = Math.Max(-1f, Math.Min(1f, dot));
+                        float angle = (float)Math.Acos(dot);
                         var axis = Vector3.Cross(startRay, endRay);
-                        axis.Normalize();
-                        dR = SharpDX.Matrix.RotationAxis(axis, angle);
+                        axis = Vector3.Normalize(axis);
+                        dR = Matrix4x4.CreateFromAxisAngle(axis, angle);
                     }
                     else // rotate around Z
                     {
@@ -213,17 +236,18 @@ namespace RoomAliveToolkit
                         startRay2D -= center;
                         endRay -= center;
 
-                        startRay2D.Normalize();
-                        endRay.Normalize();
+                        startRay2D = Vector2.Normalize(startRay2D);
+                        endRay = Vector2.Normalize(endRay);
 
                         float angle = (float)Math.Atan2(endRay.Y, endRay.X) - (float)Math.Atan2(startRay2D.Y, startRay2D.X);
-                        var axis = Viewport.Unproject(new Vector3(center.X, center.Y, 0), Projection, startOrientation, SharpDX.Matrix.Identity);
-                        axis.Normalize();
-                        dR = SharpDX.Matrix.RotationAxis(axis, angle);
+                        var axis = Unproject(new Vector3(center.X, center.Y, 0), Projection, startOrientation, Matrix4x4.Identity);
+                        axis = Vector3.Normalize(axis);
+                        dR = Matrix4x4.CreateFromAxisAngle(axis, angle);
                     }
 
                     orientation = dR * startOrientation;
-                    orientation.Orthonormalize();
+                    // Orthonormalize the orientation matrix
+                    orientation = Orthonormalize(orientation);
 
                     UpdateViewMatrix();
                 }
@@ -233,6 +257,26 @@ namespace RoomAliveToolkit
                 translating = false;
                 rotating = false;
             }
+        }
+
+        static Matrix4x4 Orthonormalize(Matrix4x4 m)
+        {
+            // Extract the 3x3 rotation part and re-orthonormalize via Gram-Schmidt
+            var x = new Vector3(m.M11, m.M12, m.M13);
+            var y = new Vector3(m.M21, m.M22, m.M23);
+            var z = new Vector3(m.M31, m.M32, m.M33);
+
+            x = Vector3.Normalize(x);
+            y = y - Vector3.Dot(y, x) * x;
+            y = Vector3.Normalize(y);
+            z = z - Vector3.Dot(z, x) * x - Vector3.Dot(z, y) * y;
+            z = Vector3.Normalize(z);
+
+            return new Matrix4x4(
+                x.X, x.Y, x.Z, 0,
+                y.X, y.Y, y.Z, 0,
+                z.X, z.Y, z.Z, 0,
+                m.M41, m.M42, m.M43, m.M44);
         }
 
         void Parent_MouseWheel(object sender, MouseEventArgs e)
@@ -270,14 +314,14 @@ namespace RoomAliveToolkit
             return (RoomAliveToolkit.Win32.GetAsyncKeyState(key) >> 15 != 0);
         }
 
-        SharpDX.Matrix view;
+        Matrix4x4 view;
         Vector3 position;
-        SharpDX.Matrix orientation;
+        Matrix4x4 orientation;
         Control control;
         bool rotating = false;
         bool translating = false;
         bool rotateXY;
-        SharpDX.Matrix startOrientation;
+        Matrix4x4 startOrientation;
         System.Drawing.Point startMousePosition, mousePosition, lastMousePosition;
         Vector3 startPosition;
         bool mouseOver;

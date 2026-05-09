@@ -1,31 +1,92 @@
-﻿using Microsoft.Kinect;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 
 namespace RoomAliveToolkit
 {
     [DataContract]
-    public class Kinect2Calibration
+    public class Kinect2Calibration : SensorCalibration
     {
         public const int depthImageWidth = 512;
         public const int depthImageHeight = 424;
         public const int colorImageWidth = 1920;
         public const int colorImageHeight = 1080;
 
-        [DataMember]
-        public Matrix colorCameraMatrix;
-        [DataMember]
-        public Matrix colorLensDistortion;
-        [DataMember]
-        public Matrix depthCameraMatrix;
-        [DataMember]
-        public Matrix depthLensDistortion;
-        [DataMember]
-        public Matrix depthToColorTransform;
-
-        public void RecoverCalibrationFromSensor(KinectSensor kinectSensor)
+        // Override SensorCalibration dimension properties to return Kinect v2 constants.
+        public override int DepthImageWidth
         {
+            get { return depthImageWidth; }
+            set { /* fixed for Kinect v2 */ }
+        }
+        public override int DepthImageHeight
+        {
+            get { return depthImageHeight; }
+            set { /* fixed for Kinect v2 */ }
+        }
+        public override int ColorImageWidth
+        {
+            get { return colorImageWidth; }
+            set { /* fixed for Kinect v2 */ }
+        }
+        public override int ColorImageHeight
+        {
+            get { return colorImageHeight; }
+            set { /* fixed for Kinect v2 */ }
+        }
+
+        [DataMember]
+        public Matrix colorCameraMatrix
+        {
+            get { return ColorCameraMatrix; }
+            set { ColorCameraMatrix = value; }
+        }
+        [DataMember]
+        public Matrix colorLensDistortion
+        {
+            get { return ColorLensDistortion; }
+            set { ColorLensDistortion = value; }
+        }
+        [DataMember]
+        public Matrix depthCameraMatrix
+        {
+            get { return DepthCameraMatrix; }
+            set { DepthCameraMatrix = value; }
+        }
+        [DataMember]
+        public Matrix depthLensDistortion
+        {
+            get { return DepthLensDistortion; }
+            set { DepthLensDistortion = value; }
+        }
+        [DataMember]
+        public Matrix depthToColorTransform
+        {
+            get { return DepthToColorTransform; }
+            set { DepthToColorTransform = value; }
+        }
+
+        /// <summary>
+        /// Recover calibration from a depth sensor using the IDepthSensor abstraction.
+        /// Projects a grid of 3D points through the sensor's coordinate mapper to recover
+        /// intrinsics and the depth-to-color transform via Levenberg-Marquardt optimization.
+        /// </summary>
+        /// <param name="sensor">The depth sensor to calibrate from.</param>
+        /// <param name="projectCameraPointToColor">
+        /// Function that maps a 3D camera-space point (x,y,z) to color image coordinates (u,v).
+        /// For Azure Kinect: use the SDK's Calibration.TransformTo2D method.
+        /// Returns null if the point is outside the valid projection range.
+        /// </param>
+        /// <param name="projectCameraPointToDepth">
+        /// Function that maps a 3D camera-space point (x,y,z) to depth image coordinates (u,v).
+        /// Returns null if the point is outside the valid projection range.
+        /// </param>
+        public void RecoverCalibrationFromSensor(
+            IDepthSensor sensor,
+            Func<float, float, float, System.Drawing.PointF?> projectCameraPointToColor,
+            Func<float, float, float, System.Drawing.PointF?> projectCameraPointToDepth)
+        {
+            var cal = sensor.Calibration;
+
             colorCameraMatrix = new RoomAliveToolkit.Matrix(3, 3);
             colorLensDistortion = new RoomAliveToolkit.Matrix(2, 1);
             depthCameraMatrix = new RoomAliveToolkit.Matrix(3, 3);
@@ -44,49 +105,39 @@ namespace RoomAliveToolkit
                 for (float y = -2f; y < 2f; y += 0.2f)
                     for (float z = 0.4f; z < 4.5f; z += 0.4f)
                     {
-                        var kinectCameraPoint = new CameraSpacePoint();
-                        kinectCameraPoint.X = x;
-                        kinectCameraPoint.Y = y;
-                        kinectCameraPoint.Z = z;
+                        var colorPt = projectCameraPointToColor(x, y, z);
+                        var depthPt = projectCameraPointToDepth(x, y, z);
 
-                        // use SDK's projection
-                        // adjust Y to make RH cooridnate system that is a projection of Kinect 3D points
-                        var kinectColorPoint = kinectSensor.CoordinateMapper.MapCameraPointToColorSpace(kinectCameraPoint);
-                        kinectColorPoint.Y = colorImageHeight - kinectColorPoint.Y;
-                        var kinectDepthPoint = kinectSensor.CoordinateMapper.MapCameraPointToDepthSpace(kinectCameraPoint);
-                        kinectDepthPoint.Y = depthImageHeight - kinectDepthPoint.Y;
+                        if (colorPt == null || depthPt == null)
+                            continue;
 
-                        if ((kinectColorPoint.X >= 0) && (kinectColorPoint.X < colorImageWidth) &&
-                            (kinectColorPoint.Y >= 0) && (kinectColorPoint.Y < colorImageHeight) &&
-                            (kinectDepthPoint.X >= 0) && (kinectDepthPoint.X < depthImageWidth) &&
-                            (kinectDepthPoint.Y >= 0) && (kinectDepthPoint.Y < depthImageHeight))
+                        // adjust Y to make RH coordinate system
+                        float colorU = colorPt.Value.X;
+                        float colorV = cal.ColorImageHeight - colorPt.Value.Y;
+                        float depthU = depthPt.Value.X;
+                        float depthV = cal.DepthImageHeight - depthPt.Value.Y;
+
+                        if (colorU >= 0 && colorU < cal.ColorImageWidth &&
+                            colorV >= 0 && colorV < cal.ColorImageHeight &&
+                            depthU >= 0 && depthU < cal.DepthImageWidth &&
+                            depthV >= 0 && depthV < cal.DepthImageHeight)
                         {
                             n++;
                             var objectPoint = new RoomAliveToolkit.Matrix(3, 1);
-                            objectPoint[0] = kinectCameraPoint.X;
-                            objectPoint[1] = kinectCameraPoint.Y;
-                            objectPoint[2] = kinectCameraPoint.Z;
+                            objectPoint[0] = x;
+                            objectPoint[1] = y;
+                            objectPoint[2] = z;
                             objectPoints1.Add(objectPoint);
 
-                            var colorPoint = new System.Drawing.PointF();
-                            colorPoint.X = kinectColorPoint.X;
-                            colorPoint.Y = kinectColorPoint.Y;
-                            colorPoints1.Add(colorPoint);
-
-
-                            //Console.WriteLine(objectPoint[0] + "\t" + objectPoint[1] + "\t" + colorPoint.X + "\t" + colorPoint.Y);
-
-                            var depthPoint = new System.Drawing.PointF();
-                            depthPoint.X = kinectDepthPoint.X;
-                            depthPoint.Y = kinectDepthPoint.Y;
-                            depthPoints1.Add(depthPoint);
+                            colorPoints1.Add(new System.Drawing.PointF(colorU, colorV));
+                            depthPoints1.Add(new System.Drawing.PointF(depthU, depthV));
                         }
                     }
 
             colorCameraMatrix[0, 0] = 1000; //fx
             colorCameraMatrix[1, 1] = 1000; //fy
-            colorCameraMatrix[0, 2] = colorImageWidth / 2; //cx
-            colorCameraMatrix[1, 2] = colorImageHeight / 2; //cy
+            colorCameraMatrix[0, 2] = cal.ColorImageWidth / 2; //cx
+            colorCameraMatrix[1, 2] = cal.ColorImageHeight / 2; //cy
             colorCameraMatrix[2, 2] = 1;
 
             var rotation = new Matrix(3, 1);
@@ -102,24 +153,13 @@ namespace RoomAliveToolkit
                     depthToColorTransform[i, j] = rotationMatrix[i, j];
             }
 
-
             depthCameraMatrix[0, 0] = 360; //fx
             depthCameraMatrix[1, 1] = 360; //fy
-            depthCameraMatrix[0, 2] = depthImageWidth / 2; //cx
-            depthCameraMatrix[1, 2] = depthImageHeight / 2; //cy
+            depthCameraMatrix[0, 2] = cal.DepthImageWidth / 2; //cx
+            depthCameraMatrix[1, 2] = cal.DepthImageHeight / 2; //cy
             depthCameraMatrix[2, 2] = 1;
 
             var depthError = CalibrateDepthCamera(objectPoints1, depthPoints1, depthCameraMatrix, depthLensDistortion);
-
-            //// latest SDK gives access to depth intrinsics directly -- this gives slightly higher projection error; not sure why
-            //var depthIntrinsics = kinectSensor.CoordinateMapper.GetDepthCameraIntrinsics();
-            //depthCameraMatrix[0, 0] = depthIntrinsics.FocalLengthX;
-            //depthCameraMatrix[1, 1] = depthIntrinsics.FocalLengthY;
-            //depthCameraMatrix[0, 2] = depthIntrinsics.PrincipalPointX;
-            //depthCameraMatrix[1, 2] = depthImageHeight - depthIntrinsics.PrincipalPointY; // note flip in Y!
-            //depthDistCoeffs[0] = depthIntrinsics.RadialDistortionSecondOrder;
-            //depthDistCoeffs[1] = depthIntrinsics.RadialDistortionFourthOrder;
-
 
             // check projections
             double depthProjectionError = 0;
@@ -132,37 +172,33 @@ namespace RoomAliveToolkit
                 var testDepthPoint = depthPoints1[i];
                 var testColorPoint = colorPoints1[i];
 
-                // "camera space" == depth camera space
-                // depth camera projection
-                double depthU, depthV;
-                CameraMath.Project(depthCameraMatrix, depthLensDistortion, testObjectPoint[0], testObjectPoint[1], testObjectPoint[2], out depthU, out depthV);
+                double depthPU, depthPV;
+                CameraMath.Project(depthCameraMatrix, depthLensDistortion, testObjectPoint[0], testObjectPoint[1], testObjectPoint[2], out depthPU, out depthPV);
 
-                double dx = testDepthPoint.X - depthU;
-                double dy = testDepthPoint.Y - depthV;
+                double dx = testDepthPoint.X - depthPU;
+                double dy = testDepthPoint.Y - depthPV;
                 depthProjectionError += (dx * dx) + (dy * dy);
 
-                // color camera projection
                 testObjectPoint4[0] = testObjectPoint[0];
                 testObjectPoint4[1] = testObjectPoint[1];
                 testObjectPoint4[2] = testObjectPoint[2];
                 testObjectPoint4[3] = 1;
 
                 color.Mult(depthToColorTransform, testObjectPoint4);
-                color.Scale(1.0 / color[3]); // not necessary for this transform
+                color.Scale(1.0 / color[3]);
 
-                double colorU, colorV;
-                CameraMath.Project(colorCameraMatrix, colorLensDistortion, color[0], color[1], color[2], out colorU, out colorV);
+                double colorPU, colorPV;
+                CameraMath.Project(colorCameraMatrix, colorLensDistortion, color[0], color[1], color[2], out colorPU, out colorPV);
 
-                dx = testColorPoint.X - colorU;
-                dy = testColorPoint.Y - colorV;
+                dx = testColorPoint.X - colorPU;
+                dy = testColorPoint.Y - colorPV;
                 colorProjectionError += (dx * dx) + (dy * dy);
             }
             depthProjectionError /= n;
             colorProjectionError /= n;
 
-
             stopWatch.Stop();
-            Console.WriteLine("FakeCalibration :");
+            Console.WriteLine("Calibration recovered from sensor:");
             Console.WriteLine("n = " + n);
             Console.WriteLine("color error = " + colorError);
             Console.WriteLine("depth error = " + depthError);
@@ -172,71 +208,30 @@ namespace RoomAliveToolkit
             Console.WriteLine("depth lens distortion = \n" + depthLensDistortion);
             Console.WriteLine("color camera matrix = \n" + colorCameraMatrix);
             Console.WriteLine("color lens distortion = \n" + colorLensDistortion);
-
             Console.WriteLine(stopWatch.ElapsedMilliseconds + " ms");
-
-
-            //// get camera space table
-            //// this does not change frame to frame (or so I believe)
-            //var tableEntries = kinectSensor.CoordinateMapper.GetDepthFrameToCameraSpaceTable();
-
-            //// compute our own version of the camera space table and compare it to the SDK's
-            //stopWatch.Restart();
-
-            //var tableEntries2 = ComputeDepthFrameToCameraSpaceTable();
-            //Console.WriteLine("ComputeDepthFrameToCameraSpaceTable took " + stopWatch.ElapsedMilliseconds + " ms");
-
-            //{
-            //    float error = 0;
-            //    for (int framey = 0; framey < depthImageHeight; framey++)
-            //        for (int framex = 0; framex < depthImageWidth; framex++)
-            //        {
-            //            var point1 = tableEntries[depthImageWidth * framey + framex];
-            //            var point2 = tableEntries2[depthImageWidth * framey + framex];
-
-            //            error += (float)Math.Sqrt((point1.X - point2.X) * (point1.X - point2.X) + (point1.Y - point2.Y) * (point1.Y - point2.Y));
-            //        }
-            //    error /= (float)(depthImageHeight * depthImageWidth);
-            //    Console.WriteLine("error = " + error);
-            //}
-
-
         }
 
-        public System.Drawing.PointF[] ComputeDepthFrameToCameraSpaceTable(int tableWidth = depthImageWidth, int tableHeight = depthImageHeight)
+        // Parameterless override delegates to the base class implementation,
+        // which uses DepthCameraMatrix / DepthLensDistortion / DepthImageWidth / DepthImageHeight
+        // (all bridged from this class's existing fields).
+        public override System.Drawing.PointF[] ComputeDepthFrameToCameraSpaceTable()
         {
-            float fx = (float)depthCameraMatrix[0, 0];
-            float fy = (float)depthCameraMatrix[1, 1];
-            float cx = (float)depthCameraMatrix[0, 2];
-            float cy = (float)depthCameraMatrix[1, 2];
-            float[] kappa = new float[] { (float)depthLensDistortion[0], (float)depthLensDistortion[1] };
+            return ComputeDepthFrameToCameraSpaceTable(depthImageWidth, depthImageHeight);
+        }
 
-            var table = new System.Drawing.PointF[tableWidth * tableHeight];
-
-            for (int y = 0; y < tableHeight; y++)
-                for (int x = 0; x < tableWidth; x++)
-                {
-                    double xout, yout;
-                    double framex = (double)x / (double)tableWidth * depthImageWidth;   // in depth camera image coordinates
-                    double framey = (double)y / (double)tableHeight * depthImageHeight;
-
-                    CameraMath.Undistort(fx, fy, cx, cy, kappa, framex, (depthImageHeight - framey), out xout, out yout);
-
-                    var point = new System.Drawing.PointF();
-                    point.X = (float)xout;
-                    point.Y = (float)yout;
-                    table[tableWidth * y + x] = point;
-                }
-            return table;
+        // Parameterized overload kept for backward compatibility with existing callers.
+        public new System.Drawing.PointF[] ComputeDepthFrameToCameraSpaceTable(int tableWidth, int tableHeight)
+        {
+            return base.ComputeDepthFrameToCameraSpaceTable(tableWidth, tableHeight);
         }
 
         public System.Drawing.PointF[] ComputeColorFrameToCameraSpaceTable(int tableWidth = colorImageWidth, int tableHeight = colorImageHeight)
         {
-            float fx = (float)colorCameraMatrix[0, 0];
-            float fy = (float)colorCameraMatrix[1, 1];
-            float cx = (float)colorCameraMatrix[0, 2];
-            float cy = (float)colorCameraMatrix[1, 2];
-            float[] kappa = new float[] { (float)colorLensDistortion[0], (float)colorLensDistortion[1] };
+            float fx = (float)ColorCameraMatrix[0, 0];
+            float fy = (float)ColorCameraMatrix[1, 1];
+            float cx = (float)ColorCameraMatrix[0, 2];
+            float cy = (float)ColorCameraMatrix[1, 2];
+            float[] kappa = new float[] { (float)ColorLensDistortion[0], (float)ColorLensDistortion[1] };
 
             var table = new System.Drawing.PointF[tableWidth * tableHeight];
 
@@ -244,7 +239,7 @@ namespace RoomAliveToolkit
                 for (int x = 0; x < tableWidth; x++)
                 {
                     double xout, yout;
-                    double framex = (double)x / (double)tableWidth * colorImageWidth;   // in color camera image coordinates
+                    double framex = (double)x / (double)tableWidth * colorImageWidth;
                     double framey = (double)y / (double)tableHeight * colorImageHeight;
 
                     CameraMath.Undistort(fx, fy, cx, cy, kappa, framex, (colorImageHeight - framey), out xout, out yout);

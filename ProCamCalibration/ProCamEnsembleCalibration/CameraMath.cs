@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using SharpDX;
+using System.Numerics;
 
 namespace RoomAliveToolkit
 {
@@ -874,33 +874,60 @@ namespace RoomAliveToolkit
         public static Matrix RotationMatrixFromRotationVector(Matrix rotationVector)
         {
             double angle = rotationVector.Norm();
-            var axis = new SharpDX.Vector3((float)(rotationVector[0] / angle), (float)(rotationVector[1] / angle), (float)(rotationVector[2] / angle));
+            var axis = new Vector3((float)(rotationVector[0] / angle), (float)(rotationVector[1] / angle), (float)(rotationVector[2] / angle));
 
-            // Why the negative sign? SharpDX returns a post-multiply matrix. Instead of transposing to get the pre-multiply matrix we just invert the input rotation.
-            var sR = SharpDX.Matrix.RotationAxis(axis, -(float)angle);
+            // Why the negative sign? System.Numerics uses row-major convention. Instead of transposing to get the pre-multiply matrix we just invert the input rotation.
+            var sR = Matrix4x4.CreateFromAxisAngle(axis, -(float)angle);
 
             var R = new Matrix(3, 3);
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++)
-                    R[i, j] = sR[i, j];
+                    R[i, j] = GetMatrix4x4Element(sR, i, j);
             return R;
         }
 
         public static Matrix RotationVectorFromRotationMatrix(Matrix R)
         {
-            var sR = new SharpDX.Matrix();
-            for (int i = 0; i < 3; i++)
-                for (int j = 0; j < 3; j++)
-                    sR[i, j] = (float)R[i, j];
-            var q = SharpDX.Quaternion.RotationMatrix(sR);
+            var sR = new Matrix4x4(
+                (float)R[0, 0], (float)R[0, 1], (float)R[0, 2], 0,
+                (float)R[1, 0], (float)R[1, 1], (float)R[1, 2], 0,
+                (float)R[2, 0], (float)R[2, 1], (float)R[2, 2], 0,
+                0, 0, 0, 1);
+            var q = Quaternion.CreateFromRotationMatrix(sR);
 
-            // Why the negative sign? SharpDX assumes a post-multiply rotation matrix. Instead of transposing the input we invert the output quaternion.
-            var sRotationVector = -q.Angle * q.Axis;
+            // Extract axis-angle from quaternion
+            float angle = 2.0f * (float)Math.Acos(Math.Min(Math.Abs(q.W), 1.0f));
+            float sinHalfAngle = (float)Math.Sin(angle / 2.0f);
+            Vector3 axis;
+            if (sinHalfAngle > 1e-6f)
+                axis = new Vector3(q.X, q.Y, q.Z) / sinHalfAngle;
+            else
+                axis = new Vector3(1, 0, 0); // arbitrary axis for near-zero rotation
+
+            // Why the negative sign? System.Numerics assumes a row-major rotation matrix. Instead of transposing the input we invert the output.
+            var sRotationVector = -angle * axis;
 
             var rotationVector = new Matrix(3, 1);
-            for (int i = 0; i < 3; i++)
-                rotationVector[i] = sRotationVector[i];
+            rotationVector[0] = sRotationVector.X;
+            rotationVector[1] = sRotationVector.Y;
+            rotationVector[2] = sRotationVector.Z;
             return rotationVector;
+        }
+
+        /// <summary>
+        /// Helper to access Matrix4x4 elements by row/column index.
+        /// </summary>
+        private static float GetMatrix4x4Element(Matrix4x4 m, int row, int col)
+        {
+            // Matrix4x4 fields: M{row+1}{col+1}
+            return (row, col) switch
+            {
+                (0, 0) => m.M11, (0, 1) => m.M12, (0, 2) => m.M13, (0, 3) => m.M14,
+                (1, 0) => m.M21, (1, 1) => m.M22, (1, 2) => m.M23, (1, 3) => m.M24,
+                (2, 0) => m.M31, (2, 1) => m.M32, (2, 2) => m.M33, (2, 3) => m.M34,
+                (3, 0) => m.M41, (3, 1) => m.M42, (3, 2) => m.M43, (3, 3) => m.M44,
+                _ => throw new ArgumentOutOfRangeException()
+            };
         }
 
     }

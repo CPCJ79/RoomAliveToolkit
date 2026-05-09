@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package roomalive;
+
+option csharp_namespace = "RoomAlive.Grpc";
+
+import "google/protobuf/empty.proto";
+
+service ProjectorServer {
+  rpc OpenDisplay (ScreenIndexRequest) returns (google.protobuf.Empty);
+  rpc Size (ScreenIndexRequest) returns (SizeReply);
+  rpc ScreenCount (google.protobuf.Empty) returns (CountReply);
+  rpc SetColor (SetColorRequest) returns (google.protobuf.Empty);
+  rpc DisplayName (DisplayNameRequest) returns (google.protobuf.Empty);
+  rpc NumberOfGrayCodeImages (ScreenIndexRequest) returns (CountReply);
+  rpc DisplayGrayCode (DisplayGrayCodeRequest) returns (google.protobuf.Empty);
+  rpc CloseDisplay (ScreenIndexRequest) returns (google.protobuf.Empty);
+}
+
+message ScreenIndexRequest {
+  int32 screen_index = 1;
+}
+
+message SizeReply {
+  int32 width = 1;
+  int32 height = 2;
+}
+
+message CountReply {
+  int32 count = 1;
+}
+
+message SetColorRequest {
+  int32 screen_index = 1;
+  float r = 2;
+  float g = 3;
+  float b = 4;
+}
+
+message DisplayNameRequest {
+  int32 screen_index = 1;
+  string name = 2;
+}
+
+message DisplayGrayCodeRequest {
+  int32 screen_index = 1;
+  int32 index = 2;
+}

@@ -1,27 +1,27 @@
-﻿using System.IO;
-using SharpDX;
-using SharpDX.Direct3D11;
-using SharpDX.D3DCompiler;
+using System.IO;
 using System.Runtime.InteropServices;
+using Vortice.Direct3D11;
+using Vortice.DXGI;
+using Vortice.Mathematics;
 
 namespace RoomAliveToolkit
 {
     public class FilterPixelShader
     {
-        public FilterPixelShader(Device device, int imageWidth, int imageHeight, int constantBufferSize, string pixelShaderBytecodeFilename)
+        public FilterPixelShader(ID3D11Device device, int imageWidth, int imageHeight, int constantBufferSize, string pixelShaderBytecodeFilename)
         {
-            vertexShader = new VertexShader(device, new ShaderBytecode(File.ReadAllBytes("Content/FullScreenQuadVS.cso")));
-            pixelShader = new PixelShader(device, new ShaderBytecode(File.ReadAllBytes(pixelShaderBytecodeFilename)));
+            vertexShader = device.CreateVertexShader(File.ReadAllBytes("Content/FullScreenQuadVS.cso"));
+            pixelShader = device.CreatePixelShader(File.ReadAllBytes(pixelShaderBytecodeFilename));
 
-            var rasterizerStateDesc = new RasterizerStateDescription()
+            var rasterizerStateDesc = new RasterizerDescription()
             {
-                CullMode = CullMode.None, 
+                CullMode = CullMode.None,
                 FillMode = FillMode.Solid,
-                IsDepthClipEnabled = false,
-                IsFrontCounterClockwise = true,
-                IsMultisampleEnabled = false,
+                DepthClipEnable = false,
+                FrontCounterClockwise = true,
+                MultisampleEnable = false,
             };
-            rasterizerState = new RasterizerState(device, rasterizerStateDesc);
+            rasterizerState = device.CreateRasterizerState(rasterizerStateDesc);
 
             if (constantBufferSize > 0)
             {
@@ -29,50 +29,48 @@ namespace RoomAliveToolkit
                 {
                     Usage = ResourceUsage.Dynamic,
                     BindFlags = BindFlags.ConstantBuffer,
-                    SizeInBytes = constantBufferSize,
-                    CpuAccessFlags = CpuAccessFlags.Write,
+                    ByteWidth = (uint)constantBufferSize,
+                    CPUAccessFlags = CpuAccessFlags.Write,
                     StructureByteStride = 0,
-                    OptionFlags = 0,
+                    MiscFlags = 0,
                 };
-                constantBuffer = new Buffer(device, constantBufferDesc);
+                constantBuffer = device.CreateBuffer(constantBufferDesc);
             }
 
-            viewport = new Viewport(0, 0, imageWidth, imageHeight); // TODO: get these dimensions
-            vertexBufferBinding = new VertexBufferBinding(null, 0, 0);
+            viewport = new Viewport(0, 0, imageWidth, imageHeight);
         }
 
-        public virtual void Render(DeviceContext deviceContext, ShaderResourceView inputRV, RenderTargetView renderTargetView)
+        public virtual void Render(ID3D11DeviceContext deviceContext, ID3D11ShaderResourceView inputRV, ID3D11RenderTargetView renderTargetView)
         {
-            deviceContext.InputAssembler.SetVertexBuffers(0, vertexBufferBinding);
-            deviceContext.InputAssembler.InputLayout = null;
-            deviceContext.InputAssembler.PrimitiveTopology = SharpDX.Direct3D.PrimitiveTopology.TriangleStrip;
-            deviceContext.OutputMerger.SetTargets(renderTargetView);
-            deviceContext.Rasterizer.State = rasterizerState;
-            deviceContext.Rasterizer.SetViewport(viewport);
-            deviceContext.VertexShader.SetShaderResource(0, null); // TODO: this should be done by the depthAndColorVS
-            deviceContext.VertexShader.Set(vertexShader);
-            deviceContext.GeometryShader.Set(null);
-            deviceContext.PixelShader.Set(pixelShader);
-            deviceContext.PixelShader.SetShaderResource(0, inputRV);
+            deviceContext.IASetVertexBuffer(0, null, 0);
+            deviceContext.IASetInputLayout(null);
+            deviceContext.IASetPrimitiveTopology(Vortice.Direct3D.PrimitiveTopology.TriangleStrip);
+            deviceContext.OMSetRenderTargets(renderTargetView);
+            deviceContext.RSSetState(rasterizerState);
+            deviceContext.RSSetViewport(viewport);
+            deviceContext.VSSetShaderResource(0, null); // TODO: this should be done by the depthAndColorVS
+            deviceContext.VSSetShader(vertexShader);
+            deviceContext.GSSetShader(null);
+            deviceContext.PSSetShader(pixelShader);
+            deviceContext.PSSetShaderResource(0, inputRV);
             if (constantBuffer != null)
-                deviceContext.PixelShader.SetConstantBuffer(0, constantBuffer);
+                deviceContext.PSSetConstantBuffer(0, constantBuffer);
             deviceContext.Draw(4, 0);
-            RenderTargetView nullRTV = null;
-            deviceContext.OutputMerger.SetTargets(nullRTV);
-            deviceContext.PixelShader.SetShaderResource(0, null);
+            ID3D11RenderTargetView nullRTV = null;
+            deviceContext.OMSetRenderTargets(nullRTV);
+            deviceContext.PSSetShaderResource(0, null);
         }
 
-        VertexShader vertexShader;
-        PixelShader pixelShader; 
-        RasterizerState rasterizerState;
+        ID3D11VertexShader vertexShader;
+        ID3D11PixelShader pixelShader;
+        ID3D11RasterizerState rasterizerState;
         public Viewport viewport;
-        VertexBufferBinding vertexBufferBinding;
-        protected Buffer constantBuffer;
+        protected ID3D11Buffer constantBuffer;
     }
 
     public class FromUIntPS : FilterPixelShader
     {
-        public FromUIntPS(Device device, int imageWidth, int imageHeight)
+        public FromUIntPS(ID3D11Device device, int imageWidth, int imageHeight)
             : base(device, imageWidth, imageHeight, 0, "Content/FromUIntPS.cso")
         {
         }
@@ -82,70 +80,69 @@ namespace RoomAliveToolkit
     public class PassThrough : FilterPixelShader
     {
         //TODO: maybe just put sampler in base class
-        public PassThrough(Device device, int imageWidth, int imageHeight)
+        public PassThrough(ID3D11Device device, int imageWidth, int imageHeight)
             : base(device, imageWidth, imageHeight, 0, "Content/PassThroughPS.cso")
         {
-            var samplerStateDesc = new SamplerStateDescription()
+            var samplerStateDesc = new SamplerDescription()
             {
                 Filter = Filter.MinMagMipLinear,
                 AddressU = TextureAddressMode.Border,
                 AddressV = TextureAddressMode.Border,
                 AddressW = TextureAddressMode.Border,
-                //BorderColor = new SharpDX.Color4(0.5f, 0.5f, 0.5f, 1.0f),
-                BorderColor = new SharpDX.Color4(0, 0, 0, 1.0f),
+                //BorderColor = new Color4(0.5f, 0.5f, 0.5f, 1.0f),
+                BorderColor = new Color4(0, 0, 0, 1.0f),
             };
-            samplerState = new SamplerState(device, samplerStateDesc);
+            samplerState = device.CreateSamplerState(samplerStateDesc);
         }
-        public override void Render(DeviceContext deviceContext, ShaderResourceView inputRV, RenderTargetView renderTargetView)
+        public override void Render(ID3D11DeviceContext deviceContext, ID3D11ShaderResourceView inputRV, ID3D11RenderTargetView renderTargetView)
         {
-            deviceContext.PixelShader.SetSampler(0, samplerState);
+            deviceContext.PSSetSampler(0, samplerState);
 
             base.Render(deviceContext, inputRV, renderTargetView);
         }
- 
-        SamplerState samplerState;
+
+        ID3D11SamplerState samplerState;
     }
 
     public class RadialWobble : FilterPixelShader
     {
-        public RadialWobble(Device device, int imageWidth, int imageHeight)
+        public RadialWobble(ID3D11Device device, int imageWidth, int imageHeight)
             : base(device, imageWidth, imageHeight, constantBufferSize, "Content/RadialWobblePS.cso")
         {
-            var samplerStateDesc = new SamplerStateDescription()
+            var samplerStateDesc = new SamplerDescription()
             {
                 Filter = Filter.MinMagMipLinear,
                 AddressU = TextureAddressMode.Border,
                 AddressV = TextureAddressMode.Border,
                 AddressW = TextureAddressMode.Border,
-                //BorderColor = new SharpDX.Color4(0.5f, 0.5f, 0.5f, 1.0f),
-                BorderColor = new SharpDX.Color4(0, 0, 0, 1.0f),
+                //BorderColor = new Color4(0.5f, 0.5f, 0.5f, 1.0f),
+                BorderColor = new Color4(0, 0, 0, 1.0f),
             };
-            samplerState = new SamplerState(device, samplerStateDesc);
+            samplerState = device.CreateSamplerState(samplerStateDesc);
 
             SetConstants(device.ImmediateContext, 0);
         }
-        public override void Render(DeviceContext deviceContext, ShaderResourceView inputRV, RenderTargetView renderTargetView)
+        public override void Render(ID3D11DeviceContext deviceContext, ID3D11ShaderResourceView inputRV, ID3D11RenderTargetView renderTargetView)
         {
-            deviceContext.PixelShader.SetSampler(0, samplerState);
+            deviceContext.PSSetSampler(0, samplerState);
 
             base.Render(deviceContext, inputRV, renderTargetView);
         }
- 
-        SamplerState samplerState;
+
+        ID3D11SamplerState samplerState;
 
         const int constantBufferSize = 16; // must be multiple of 16
 
-        public void SetConstants(DeviceContext deviceContext, float newAlpha)
+        public void SetConstants(ID3D11DeviceContext deviceContext, float newAlpha)
         {
             Constants constants = new Constants()
             {
                 alpha = newAlpha,
             };
 
-            DataStream dataStream;
-            deviceContext.MapSubresource(constantBuffer, MapMode.WriteDiscard, MapFlags.None, out dataStream);
-            dataStream.Write<Constants>(constants);
-            deviceContext.UnmapSubresource(constantBuffer, 0);
+            var mapped = deviceContext.Map(constantBuffer, MapMode.WriteDiscard);
+            Marshal.StructureToPtr(constants, mapped.DataPointer, false);
+            deviceContext.Unmap(constantBuffer, 0);
         }
 
 
@@ -165,13 +162,13 @@ namespace RoomAliveToolkit
 
     public class BilateralFilter : FilterPixelShader
     {
-        public BilateralFilter(Device device, int imageWidth, int imageHeight)
+        public BilateralFilter(ID3D11Device device, int imageWidth, int imageHeight)
             : base(device, imageWidth, imageHeight, constantBufferSize, "Content/BilateralFilterPS.cso")
         {
             SetConstants(device.ImmediateContext, 4f, 100f);
         }
 
-        public void SetConstants(DeviceContext deviceContext, float newSpatialSigma, float newIntensitySigma)
+        public void SetConstants(ID3D11DeviceContext deviceContext, float newSpatialSigma, float newIntensitySigma)
         {
             Constants constants = new Constants()
             {
@@ -179,10 +176,9 @@ namespace RoomAliveToolkit
                 intensitySigma = 1f/newIntensitySigma,
             };
 
-            DataStream dataStream;
-            deviceContext.MapSubresource(constantBuffer, MapMode.WriteDiscard, MapFlags.None, out dataStream);
-            dataStream.Write<Constants>(constants);
-            deviceContext.UnmapSubresource(constantBuffer, 0);
+            var mapped = deviceContext.Map(constantBuffer, MapMode.WriteDiscard);
+            Marshal.StructureToPtr(constants, mapped.DataPointer, false);
+            deviceContext.Unmap(constantBuffer, 0);
         }
 
         const int constantBufferSize = 16; // must be multiple of 16

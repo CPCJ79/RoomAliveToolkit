@@ -1,32 +1,35 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Windows.Forms;
-using SharpDX;
-using SharpDX.Direct2D1;
-using SharpDX.DirectWrite;
+using Vortice.Direct2D1;
+using Vortice.DirectWrite;
+using Vortice.Mathematics;
+using Vortice.DXGI;
+using Vortice.DCommon;
 using RoomAliveToolkit;
 
 namespace RoomAliveToolkit
 {
     public partial class ProjectorForm : Form
     {
-        SharpDX.Direct2D1.Factory factory = new SharpDX.Direct2D1.Factory();
-        SharpDX.DirectWrite.Factory directWriteFacrtory = new SharpDX.DirectWrite.Factory();
-        RenderTarget renderTarget;
+        ID2D1Factory factory = D2D1.D2D1CreateFactory<ID2D1Factory>();
+        IDWriteFactory directWriteFactory = DWrite.DWriteCreateFactory<IDWriteFactory>();
+        ID2D1HwndRenderTarget renderTarget;
         GrayCode grayCode;
         ARGBImage[] grayCodeImages;
-        SharpDX.Direct2D1.Bitmap bitmap;
+        ID2D1Bitmap bitmap;
         int screenIndex;
         System.Drawing.Rectangle bounds;
-        SharpDX.DirectWrite.TextFormat textFormat;
-        SolidColorBrush solidColorBrush;
+        IDWriteTextFormat textFormat;
+        ID2D1SolidColorBrush solidColorBrush;
 
         public ProjectorForm(int screenIndex)
         {
@@ -42,9 +45,9 @@ namespace RoomAliveToolkit
             bounds = Screen.AllScreens[screenIndex].Bounds;
             StartPosition = FormStartPosition.Manual;
             Location = new System.Drawing.Point(bounds.X, bounds.Y);
-            Size = new Size(bounds.Width, bounds.Height);
+            Size = new System.Drawing.Size(bounds.Width, bounds.Height);
 
-            // Gray code 
+            // Gray code
             grayCode = new GrayCode(bounds.Width, bounds.Height);
             grayCodeImages = grayCode.Generate();
 
@@ -54,31 +57,31 @@ namespace RoomAliveToolkit
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
- 
+
             // Direct2D
             var renderTargetProperties = new RenderTargetProperties()
             {
-                PixelFormat = new PixelFormat(SharpDX.DXGI.Format.B8G8R8A8_UNorm, AlphaMode.Ignore)
+                PixelFormat = new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore)
             };
             var hwndRenderTargetProperties = new HwndRenderTargetProperties()
             {
                 Hwnd = this.Handle,
-                PixelSize = new Size2(bounds.Width, bounds.Height),
+                PixelSize = new SizeI(bounds.Width, bounds.Height),
                 PresentOptions = PresentOptions.Immediately,
             };
-            renderTarget = new WindowRenderTarget(factory, renderTargetProperties, hwndRenderTargetProperties);
+            renderTarget = factory.CreateHwndRenderTarget(renderTargetProperties, hwndRenderTargetProperties);
 
             var bitmapProperties = new BitmapProperties()
             {
-                PixelFormat = new PixelFormat(SharpDX.DXGI.Format.B8G8R8A8_UNorm, AlphaMode.Ignore)
+                PixelFormat = new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore)
             };
-            bitmap = new SharpDX.Direct2D1.Bitmap(renderTarget, new Size2(bounds.Width, bounds.Height), bitmapProperties);
+            bitmap = renderTarget.CreateBitmap(new SizeI(bounds.Width, bounds.Height), bitmapProperties);
 
-            textFormat = new TextFormat(directWriteFacrtory, "Arial", FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, 96.0f);
+            textFormat = directWriteFactory.CreateTextFormat("Arial", FontWeight.Normal, Vortice.DirectWrite.FontStyle.Normal, 96.0f);
             textFormat.ParagraphAlignment = ParagraphAlignment.Center;
             textFormat.TextAlignment = TextAlignment.Center;
 
-            solidColorBrush = new SolidColorBrush(renderTarget, Color4.White);
+            solidColorBrush = renderTarget.CreateSolidColorBrush(new Color4(1.0f, 1.0f, 1.0f, 1.0f));
         }
 
         public int NumberOfGrayCodeImages
@@ -89,21 +92,21 @@ namespace RoomAliveToolkit
         public void DisplayGrayCode(int i)
         {
             var image = grayCodeImages[i];
-            bitmap.CopyFromMemory(image.DataIntPtr, image.Width * 4);
+            bitmap.CopyFromMemory(image.DataIntPtr, (uint)(image.Width * 4));
             renderTarget.BeginDraw();
             renderTarget.DrawBitmap(bitmap, 1.0f, BitmapInterpolationMode.Linear);
             renderTarget.EndDraw();
             //Console.WriteLine("displaying Gray code " + i);
         }
-        
+
         public void DisplayName(string name)
         {
-            var brush = new SolidColorBrush(renderTarget, Color4.White);
-            var layoutRect = new SharpDX.RectangleF(0, 0, bounds.Width, bounds.Height);
+            var brush = renderTarget.CreateSolidColorBrush(new Color4(1.0f, 1.0f, 1.0f, 1.0f));
+            var layoutRect = new Vortice.RawRectF(0, 0, bounds.Width, bounds.Height);
 
             renderTarget.BeginDraw();
-            renderTarget.Clear(Color4.Black);
-            renderTarget.DrawRectangle(new SharpDX.RectangleF(0, 0, bounds.Width, bounds.Height), brush, 10f);
+            renderTarget.Clear(new Color4(0.0f, 0.0f, 0.0f, 1.0f));
+            renderTarget.DrawRectangle(new Vortice.RawRectF(0, 0, bounds.Width, bounds.Height), brush, 10f);
             renderTarget.DrawText(name, textFormat, layoutRect, solidColorBrush);
 
             //int nx = 4;

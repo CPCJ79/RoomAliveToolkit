@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
-using SharpDX;
+using System.Numerics;
 using System.Globalization;
 
 namespace RoomAliveToolkit
@@ -94,7 +94,7 @@ namespace RoomAliveToolkit
                         // TODO: suppoprt relative (negative) indices
                         var indices = terms[1 + i].Split('/');
                         var vertex = new VertexPositionNormalTexture();
-                        vertex.position = positions[int.Parse(indices[0]) - 1]; // OBJ indices are 1-based    
+                        vertex.position = positions[int.Parse(indices[0]) - 1]; // OBJ indices are 1-based
                         if (indices[1] != "") // optional texture coords
                             vertex.texture = textureCoords[int.Parse(indices[1]) - 1];
                         if (indices[2] != "") // optional normal
@@ -113,7 +113,7 @@ namespace RoomAliveToolkit
                     Material material = null;
                     if (materials.ContainsKey(name))
                         material = materials[name];
-                    else 
+                    else
                     {
                         material = new Material();
                         materials.Add(name, material);
@@ -201,6 +201,6 @@ namespace RoomAliveToolkit
             }
 
             file.Close();
-        }    
+        }
     }
 }

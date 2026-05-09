@@ -1,11 +1,11 @@
-﻿using SharpDX;
 using System;
+using System.Numerics;
 
 namespace RoomAliveToolkit
 {
     public class GraphicsTransforms
     {
-        public static SharpDX.Matrix ProjectionMatrixFromCameraMatrix(float fx, float fy, float cx, float cy, float w, float h, float near, float far)
+        public static Matrix4x4 ProjectionMatrixFromCameraMatrix(float fx, float fy, float cx, float cy, float w, float h, float near, float far)
         {
             // fx, fy, cx, cy are in pixels
             // input coordinate sysem is x left, y up, z foward (right handed)
@@ -17,7 +17,7 @@ namespace RoomAliveToolkit
             //             0,           0,  far / (far - near),  -near * far / (far - near),
             //             0,           0,                   1,                           0
 
-            return new SharpDX.Matrix(
+            return new Matrix4x4(
                 -(2 * fx / w), 0, -(2 * cx / w - 1), 0,
                 0, 2 * fy / h, 2 * cy / h - 1, 0,
                 0, 0, far / (far - near), -near * far / (far - near),
@@ -25,14 +25,14 @@ namespace RoomAliveToolkit
                 );
         }
 
-        public static SharpDX.Matrix PerspectiveFov(float fieldOfViewY, float aspectRatio, float near, float far)
+        public static Matrix4x4 PerspectiveFov(float fieldOfViewY, float aspectRatio, float near, float far)
         {
             // right handed, pre multiply, x left, y up, z forward
 
             float h = 1f / (float)Math.Tan(fieldOfViewY / 2f);
             float w = h / aspectRatio;
 
-            return new SharpDX.Matrix(
+            return new Matrix4x4(
                 -w, 0, 0, 0,
                 0, h, 0, 0,
                 0, 0, far / (far - near), -near * far / (far - near),
@@ -40,7 +40,7 @@ namespace RoomAliveToolkit
                 );
         }
 
-        public static SharpDX.Matrix LookAt(Vector3 cameraPosition, Vector3 cameraTarget, Vector3 cameraUpVector)
+        public static Matrix4x4 LookAt(Vector3 cameraPosition, Vector3 cameraTarget, Vector3 cameraUpVector)
         {
             // right handed, pre multiply, x left, y up, z forward
 
@@ -48,7 +48,7 @@ namespace RoomAliveToolkit
             var xaxis = Vector3.Normalize(Vector3.Cross(cameraUpVector, zaxis));
             var yaxis = Vector3.Cross(zaxis, xaxis);
 
-            return new SharpDX.Matrix(
+            return new Matrix4x4(
                 xaxis.X, xaxis.Y, xaxis.Z, -Vector3.Dot(xaxis, cameraPosition),
                 yaxis.X, yaxis.Y, yaxis.Z, -Vector3.Dot(yaxis, cameraPosition),
                 zaxis.X, zaxis.Y, zaxis.Z, -Vector3.Dot(zaxis, cameraPosition),

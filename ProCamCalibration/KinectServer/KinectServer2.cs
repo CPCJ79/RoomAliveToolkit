@@ -1,403 +1,376 @@
-﻿using System;
-using Microsoft.Kinect;
-using System.Diagnostics;
-using System.Threading;
-using System.ServiceModel;
-using System.ServiceModel.Discovery;
+using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using RoomAliveToolkit;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
-using SharpDX.WIC;
-
-/*
-Generate a client with 
-"C:\Program Files (x86)\Microsoft SDKs\Windows\v8.1A\bin\NETFX 4.5.1 Tools\x64\SvcUtil.exe" /noConfig /out:KinectClient.cs http://localhost:8733/Design_Time_Addresses/KinectServer2/Service1/ /reference:..\bin\Debug\Vision.dll /reference:..\bin\Debug\Kinect2.dll
-*/
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using RoomAlive.Grpc;
+using RoomAliveToolkit;
 
 namespace RoomAliveToolkit
 {
     /// <summary>
-    /// A singleton which does heavy lifting on Kinect stream
+    /// A singleton which polls the IDepthSensor on background threads
+    /// and distributes frames to per-client wait handles.
     /// </summary>
-    public class KinectHandler
+    public class KinectHandler : IDisposable
     {
         public static KinectHandler instance;
-        KinectSensor kinectSensor;
 
-        DepthFrameReader depthFrameReader;
-        public ushort[] depthShortBuffer = new ushort[Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight];
-        public byte[] depthByteBuffer = new byte[Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight * 2];
-        public List<AutoResetEvent> depthFrameReady = new List<AutoResetEvent>();
+        private readonly IDepthSensor sensor;
+        private readonly CancellationTokenSource cts = new CancellationTokenSource();
 
-        ColorFrameReader colorFrameReader;
-        public byte[] yuvByteBuffer = new byte[Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 2];
-        public List<AutoResetEvent> yuvFrameReady = new List<AutoResetEvent>();
-        public byte[] rgbByteBuffer = new byte[Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4];
-        public List<AutoResetEvent> rgbFrameReady = new List<AutoResetEvent>();
-        public byte[] jpegByteBuffer = new byte[Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4];
-        public List<AutoResetEvent> jpegFrameReady = new List<AutoResetEvent>();
+        // Depth
+        public byte[] depthByteBuffer;
+        public readonly List<AutoResetEvent> depthFrameReady = new List<AutoResetEvent>();
+
+        // Color YUV
+        public byte[] yuvByteBuffer;
+        public readonly List<AutoResetEvent> yuvFrameReady = new List<AutoResetEvent>();
+
+        // Color RGB (BGRA32)
+        public byte[] rgbByteBuffer;
+        public readonly List<AutoResetEvent> rgbFrameReady = new List<AutoResetEvent>();
+
+        // JPEG
+        public byte[] jpegByteBuffer;
         public int nJpegBytes = 0;
+        public readonly List<AutoResetEvent> jpegFrameReady = new List<AutoResetEvent>();
 
+        // Audio (not provided by IDepthSensor; left as placeholder)
+        public readonly List<AutoResetEvent> audioFrameReady = new List<AutoResetEvent>();
+        public readonly List<Queue<byte[]>> audioFrameQueues = new List<Queue<byte[]>>();
+
+        // Exposure metadata
         public float lastColorGain;
         public long lastColorExposureTimeTicks;
 
-        BodyFrameReader bodyFrameReader;
+        // Calibration
+        public SensorCalibration sensorCalibration;
 
-        AudioBeamFrameReader audioBeamFrameReader;
+        private readonly Stopwatch stopWatch = new Stopwatch();
 
-        public Kinect2Calibration kinect2Calibration;
-        public ManualResetEvent kinect2CalibrationReady = new ManualResetEvent(false);
-
-        ImagingFactory imagingFactory = new ImagingFactory();
-        Stopwatch stopWatch = new Stopwatch();
-
-        public KinectHandler()
+        public KinectHandler(IDepthSensor sensor)
         {
             instance = this;
-            kinectSensor = KinectSensor.GetDefault();
-            kinectSensor.CoordinateMapper.CoordinateMappingChanged += CoordinateMapper_CoordinateMappingChanged;
-            kinectSensor.Open();
+            this.sensor = sensor;
+
+            sensorCalibration = sensor.Calibration;
+
+            int depthPixels = sensorCalibration.DepthImageWidth * sensorCalibration.DepthImageHeight;
+            int colorPixels = sensorCalibration.ColorImageWidth * sensorCalibration.ColorImageHeight;
+
+            depthByteBuffer = new byte[depthPixels * 2];
+            yuvByteBuffer = new byte[colorPixels * 2];
+            rgbByteBuffer = new byte[colorPixels * 4];
+            jpegByteBuffer = new byte[colorPixels * 4];
+
+            // Start background polling threads
+            var depthThread = new Thread(DepthPollingLoop) { IsBackground = true, Name = "DepthPoll" };
+            depthThread.Start();
+
+            var colorThread = new Thread(ColorPollingLoop) { IsBackground = true, Name = "ColorPoll" };
+            colorThread.Start();
         }
 
-        //CoordinateMappingExample cooordinateMappingExample;
-
-        void CoordinateMapper_CoordinateMappingChanged(object sender, CoordinateMappingChangedEventArgs e)
+        private void DepthPollingLoop()
         {
-            kinect2Calibration = new RoomAliveToolkit.Kinect2Calibration();
-            kinect2Calibration.RecoverCalibrationFromSensor(kinectSensor);
-            kinect2CalibrationReady.Set();
-
-            //cooordinateMappingExample = new CoordinateMappingExample();
-            //cooordinateMappingExample.Run(kinect2Calibration, kinectSensor);
-
-            depthFrameReader = kinectSensor.DepthFrameSource.OpenReader();
-            depthFrameReader.FrameArrived += depthFrameReader_FrameArrived;
-
-            colorFrameReader = kinectSensor.ColorFrameSource.OpenReader();
-            colorFrameReader.FrameArrived += colorFrameReader_FrameArrived;
-
-            bodyFrameReader = kinectSensor.BodyFrameSource.OpenReader();
-            bodyFrameReader.FrameArrived += bodyFrameReader_FrameArrived;
-
-            audioBeamFrameReader = kinectSensor.AudioSource.OpenReader();
-            audioBeamFrameReader.FrameArrived += audioBeamFrameReader_FrameArrived;
-
-            audioBeamFrameReader.AudioSource.AudioBeams[0].AudioBeamMode = AudioBeamMode.Manual;
-            audioBeamFrameReader.AudioSource.AudioBeams[0].BeamAngle = 0;
-        }
-
-
-        void depthFrameReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
-        {
-            var depthFrame = e.FrameReference.AcquireFrame();
-            if (depthFrame != null)
+            while (!cts.IsCancellationRequested)
             {
-                using (depthFrame)
+                try
                 {
-                    if (depthFrameReady.Count > 0)
+                    byte[] frame = sensor.AcquireDepthFrame();
+                    if (frame != null && depthFrameReady.Count > 0)
                     {
-                        lock (depthShortBuffer)
-                            depthFrame.CopyFrameDataToArray(depthShortBuffer);
+                        lock (depthByteBuffer)
+                            Buffer.BlockCopy(frame, 0, depthByteBuffer, 0, frame.Length);
                         lock (depthFrameReady)
-                            foreach (var autoResetEvent in depthFrameReady)
-                                autoResetEvent.Set();
+                            foreach (var evt in depthFrameReady)
+                                evt.Set();
                     }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("DepthPoll error: " + ex.Message);
+                    Thread.Sleep(100);
                 }
             }
         }
 
-        void colorFrameReader_FrameArrived(object sender, ColorFrameArrivedEventArgs e)
+        private void ColorPollingLoop()
         {
-            var colorFrame = e.FrameReference.AcquireFrame();
-            if (colorFrame != null)
+            while (!cts.IsCancellationRequested)
             {
-                using (colorFrame)
+                try
                 {
-                    lastColorGain = colorFrame.ColorCameraSettings.Gain;
-                    lastColorExposureTimeTicks = colorFrame.ColorCameraSettings.ExposureTime.Ticks;
+                    bool needYuv = yuvFrameReady.Count > 0;
+                    bool needRgb = rgbFrameReady.Count > 0;
+                    bool needJpeg = jpegFrameReady.Count > 0;
 
-                    if (yuvFrameReady.Count > 0)
+                    if (!needYuv && !needRgb && !needJpeg)
                     {
-                        lock (yuvByteBuffer)
-                            colorFrame.CopyRawFrameDataToArray(yuvByteBuffer);
-                        lock (yuvFrameReady)
-                            foreach (var autoResetEvent in yuvFrameReady)
-                                autoResetEvent.Set();
+                        Thread.Sleep(10);
+                        continue;
                     }
 
-                    if ((rgbFrameReady.Count > 0) || (jpegFrameReady.Count > 0))
+                    // Update exposure metadata
+                    lastColorGain = sensor.LastColorGain;
+                    lastColorExposureTimeTicks = sensor.LastColorExposureTimeTicks;
+
+                    if (needYuv)
                     {
-                        lock (rgbByteBuffer)
-                            colorFrame.CopyConvertedFrameDataToArray(rgbByteBuffer, ColorImageFormat.Bgra);
-                        lock (rgbFrameReady)
-                            foreach (var autoResetEvent in rgbFrameReady)
-                                autoResetEvent.Set();
-                    }
-
-                    if (jpegFrameReady.Count > 0)
-                    {
-                        // should be put in a separate thread?
-
-                        stopWatch.Restart();
-
-                        var bitmapSource = new Bitmap(imagingFactory, Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight, SharpDX.WIC.PixelFormat.Format32bppBGR, BitmapCreateCacheOption.CacheOnLoad);
-                        var bitmapLock = bitmapSource.Lock(BitmapLockFlags.Write);
-                        Marshal.Copy(rgbByteBuffer, 0, bitmapLock.Data.DataPointer, Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4);
-                        bitmapLock.Dispose();
-
-                        var memoryStream = new MemoryStream();
-
-                        //var fileStream = new FileStream("test" + frame++ + ".jpg", FileMode.Create);
-                        //var stream = new WICStream(imagingFactory, "test" + frame++ + ".jpg", SharpDX.IO.NativeFileAccess.Write);
-
-                        var stream = new WICStream(imagingFactory, memoryStream);
-
-                        var jpegBitmapEncoder = new JpegBitmapEncoder(imagingFactory);
-                        jpegBitmapEncoder.Initialize(stream);
-
-                        var bitmapFrameEncode = new BitmapFrameEncode(jpegBitmapEncoder);
-                        bitmapFrameEncode.Options.ImageQuality = 0.5f;
-                        bitmapFrameEncode.Initialize();
-                        bitmapFrameEncode.SetSize(Kinect2Calibration.colorImageWidth, Kinect2Calibration.colorImageHeight);
-                        var pixelFormatGuid = PixelFormat.FormatDontCare;
-                        bitmapFrameEncode.SetPixelFormat(ref pixelFormatGuid);
-                        bitmapFrameEncode.WriteSource(bitmapSource);
-
-                        bitmapFrameEncode.Commit();
-                        jpegBitmapEncoder.Commit();
-
-                        //fileStream.Close();
-                        //fileStream.Dispose();
-
-                        //Console.WriteLine(stopWatch.ElapsedMilliseconds + "ms " + memoryStream.Length + " bytes");
-
-                        lock (jpegByteBuffer)
+                        byte[] yuvFrame = sensor.AcquireColorFrameYUV();
+                        if (yuvFrame != null)
                         {
-                            nJpegBytes = (int)memoryStream.Length;
-                            memoryStream.Seek(0, SeekOrigin.Begin);
-                            memoryStream.Read(jpegByteBuffer, 0, nJpegBytes);
-                        }
-                        lock (jpegFrameReady)
-                            foreach (var autoResetEvent in jpegFrameReady)
-                                autoResetEvent.Set();
-
-                        //var file = new FileStream("test" + frame++ + ".jpg", FileMode.Create);
-                        //file.Write(jpegByteBuffer, 0, nJpegBytes);
-                        //file.Close();
-
-                        bitmapSource.Dispose();
-                        memoryStream.Close();
-                        memoryStream.Dispose();
-                        stream.Dispose();
-                        jpegBitmapEncoder.Dispose();
-                        bitmapFrameEncode.Dispose();
-                    }
-                }
-            }
-        }
-
-        private Body[] bodies = null;
-
-        void bodyFrameReader_FrameArrived(object sender, BodyFrameArrivedEventArgs e)
-        {
-            var bodyFrame = e.FrameReference.AcquireFrame();
-            if (bodyFrame != null)
-            {
-                using (bodyFrame)
-                {
-                    if (bodies == null)
-                        bodies = new Body[bodyFrame.BodyCount];
-                    bodyFrame.GetAndRefreshBodyData(bodies);
-
-                    //if (bodyFrame.BodyCount > 0)
-                    //{
-                    //    var serializer = new XmlSerializer(typeof(Body));
-                    //    var writer = new StringWriter();
-                    //    serializer.Serialize(writer, bodies[0]);
-                    //    writer.Close();
-
-                    //    Console.WriteLine(writer);
-                    //}
-                }
-            }
-        }
-
-        public List<AutoResetEvent> audioFrameReady = new List<AutoResetEvent>();
-        public List<Queue<byte[]>> audioFrameQueues = new List<Queue<byte[]>>();
-
-        void audioBeamFrameReader_FrameArrived(object sender, AudioBeamFrameArrivedEventArgs e)
-        {
-            var audioBeamFrames = e.FrameReference.AcquireBeamFrames();
-            if (audioBeamFrames != null)
-            {
-                var audioBeamFrame = audioBeamFrames[0];
-
-                foreach(var subFrame in audioBeamFrame.SubFrames)
-                {
-                    var buffer = new byte[subFrame.FrameLengthInBytes];
-
-                    subFrame.CopyFrameDataToArray(buffer);
-
-                    lock (audioFrameQueues)
-                    {
-                        foreach (var queue in audioFrameQueues)
-                        {
-                            if (queue.Count > 10)
-                                queue.Dequeue();
-                            queue.Enqueue(buffer);
+                            lock (yuvByteBuffer)
+                                Buffer.BlockCopy(yuvFrame, 0, yuvByteBuffer, 0, yuvFrame.Length);
+                            lock (yuvFrameReady)
+                                foreach (var evt in yuvFrameReady)
+                                    evt.Set();
                         }
                     }
 
-                    lock (audioFrameReady)
-                        foreach (var autoResetEvent in audioFrameReady)
-                            autoResetEvent.Set();
+                    if (needRgb || needJpeg)
+                    {
+                        byte[] rgbFrame = sensor.AcquireColorFrameRGB();
+                        if (rgbFrame != null)
+                        {
+                            lock (rgbByteBuffer)
+                                Buffer.BlockCopy(rgbFrame, 0, rgbByteBuffer, 0, rgbFrame.Length);
+                            lock (rgbFrameReady)
+                                foreach (var evt in rgbFrameReady)
+                                    evt.Set();
 
-                    //Console.WriteLine("subframe " + audioSubFrames++ + "\t" + subFrame.FrameLengthInBytes + "\t" + audioBeamFrame.SubFrames.Count);
-                    subFrame.Dispose();
+                            if (needJpeg)
+                            {
+                                EncodeJpeg(rgbFrame);
+                            }
+                        }
+                    }
                 }
-
-                audioBeamFrame.Dispose();
-                audioBeamFrames.Dispose();
-
+                catch (Exception ex)
+                {
+                    Console.WriteLine("ColorPoll error: " + ex.Message);
+                    Thread.Sleep(100);
+                }
             }
         }
 
+        private void EncodeJpeg(byte[] bgraData)
+        {
+            stopWatch.Restart();
+
+            int width = sensorCalibration.ColorImageWidth;
+            int height = sensorCalibration.ColorImageHeight;
+
+            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            {
+                var bitmapData = bitmap.LockBits(
+                    new Rectangle(0, 0, width, height),
+                    ImageLockMode.WriteOnly,
+                    PixelFormat.Format32bppArgb);
+
+                Marshal.Copy(bgraData, 0, bitmapData.Scan0, width * height * 4);
+                bitmap.UnlockBits(bitmapData);
+
+                using (var memoryStream = new MemoryStream())
+                {
+                    // Get JPEG codec
+                    var jpegCodec = GetJpegCodec();
+                    if (jpegCodec != null)
+                    {
+                        var encoderParams = new EncoderParameters(1);
+                        encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 50L);
+                        bitmap.Save(memoryStream, jpegCodec, encoderParams);
+                    }
+                    else
+                    {
+                        bitmap.Save(memoryStream, ImageFormat.Jpeg);
+                    }
+
+                    lock (jpegByteBuffer)
+                    {
+                        nJpegBytes = (int)memoryStream.Length;
+                        memoryStream.Seek(0, SeekOrigin.Begin);
+                        memoryStream.Read(jpegByteBuffer, 0, nJpegBytes);
+                    }
+
+                    lock (jpegFrameReady)
+                        foreach (var evt in jpegFrameReady)
+                            evt.Set();
+                }
+            }
+        }
+
+        private static ImageCodecInfo GetJpegCodec()
+        {
+            foreach (var codec in ImageCodecInfo.GetImageEncoders())
+            {
+                if (codec.MimeType == "image/jpeg")
+                    return codec;
+            }
+            return null;
+        }
+
+        public void Dispose()
+        {
+            cts.Cancel();
+            sensor?.Dispose();
+        }
     }
 
     /// <summary>
-    /// Created on each session.
+    /// gRPC service implementation. A new instance is created per call (transient),
+    /// but all instances share the singleton KinectHandler for frame data.
+    /// For streaming scenarios, per-client wait handles are registered/unregistered
+    /// around each call.
     /// </summary>
-    [ServiceBehavior(ConcurrencyMode = ConcurrencyMode.Multiple)]
-    [ServiceContract]
-    public class KinectServer2
+    public class KinectServer2Service : RoomAlive.Grpc.KinectServer2.KinectServer2Base
     {
-        byte[] depthByteBuffer = new byte[Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight * 2];
-        byte[] yuvByteBuffer = new byte[Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 2];
-        byte[] rgbByteBuffer = new byte[Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4];
-
-        AutoResetEvent depthFrameReady = new AutoResetEvent(false);
-        AutoResetEvent yuvFrameReady = new AutoResetEvent(false);
-        AutoResetEvent rgbFrameReady = new AutoResetEvent(false);
-        AutoResetEvent jpegFrameReady = new AutoResetEvent(false);
-        AutoResetEvent audioFrameReady = new AutoResetEvent(false);
-
-        Queue<byte[]> audioFrameQueue = new Queue<byte[]>();
-
-        public KinectServer2()
+        public override Task<ImageReply> LatestDepthImage(Empty request, ServerCallContext context)
         {
-            lock (KinectHandler.instance.depthFrameReady) // overkill?
-                KinectHandler.instance.depthFrameReady.Add(depthFrameReady);
-            lock (KinectHandler.instance.yuvFrameReady)
-                KinectHandler.instance.yuvFrameReady.Add(yuvFrameReady);
-            lock (KinectHandler.instance.rgbFrameReady)
-                KinectHandler.instance.rgbFrameReady.Add(rgbFrameReady);
-            lock (KinectHandler.instance.jpegFrameReady)
-                KinectHandler.instance.jpegFrameReady.Add(jpegFrameReady);
-            lock (KinectHandler.instance.audioFrameReady)
-                KinectHandler.instance.audioFrameReady.Add(audioFrameReady);
-            lock (KinectHandler.instance.audioFrameQueues)
-                KinectHandler.instance.audioFrameQueues.Add(audioFrameQueue);
-
-
-            OperationContext.Current.Channel.Closed += ClientClosed;
-        }
-
-        public void ClientClosed(object sender, EventArgs e)
-        {
-            //Console.WriteLine("ClientClosed");
-
-            // remove ourselves from the singleton
-            lock (KinectHandler.instance.depthFrameReady) // overkill?
-                KinectHandler.instance.depthFrameReady.Remove(depthFrameReady);
-            lock (KinectHandler.instance.yuvFrameReady)
-                KinectHandler.instance.yuvFrameReady.Remove(yuvFrameReady);
-            lock (KinectHandler.instance.rgbFrameReady)
-                KinectHandler.instance.rgbFrameReady.Remove(rgbFrameReady);
-            lock (KinectHandler.instance.jpegFrameReady)
-                KinectHandler.instance.jpegFrameReady.Remove(jpegFrameReady);
-            lock (KinectHandler.instance.audioFrameReady)
-                KinectHandler.instance.audioFrameReady.Remove(audioFrameReady);
-            lock (KinectHandler.instance.audioFrameQueues)
-                KinectHandler.instance.audioFrameQueues.Remove(audioFrameQueue);
-        }
-
-        // Returns immediately if a frame has been made available since the last time this was called on this client;
-        // otherwise blocks until one is available.
-        [OperationContract]
-        public byte[] LatestDepthImage()
-        {
-            depthFrameReady.WaitOne();
-            // Is this copy really necessary?:
-            lock (KinectHandler.instance.depthShortBuffer)
-                Buffer.BlockCopy(KinectHandler.instance.depthShortBuffer, 0, depthByteBuffer, 0, Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight * 2);
-            return depthByteBuffer;
-        }
-
-        [OperationContract]
-        public byte[] LatestYUVImage()
-        {
-            yuvFrameReady.WaitOne();
-            lock (KinectHandler.instance.yuvByteBuffer)
-                Buffer.BlockCopy(KinectHandler.instance.yuvByteBuffer, 0, yuvByteBuffer, 0, Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 2);
-            return yuvByteBuffer;
-        }
-
-        [OperationContract]
-        public byte[] LatestRGBImage()
-        {
-            rgbFrameReady.WaitOne();
-            lock (KinectHandler.instance.rgbByteBuffer)
-                Buffer.BlockCopy(KinectHandler.instance.rgbByteBuffer, 0, rgbByteBuffer, 0, Kinect2Calibration.colorImageWidth * Kinect2Calibration.colorImageHeight * 4);
-            return rgbByteBuffer;
-        }
-
-        [OperationContract]
-        public byte[] LatestJPEGImage()
-        {
-            jpegFrameReady.WaitOne();
-            byte[] jpegByteBuffer;
-            lock (KinectHandler.instance.jpegByteBuffer)
+            var evt = new AutoResetEvent(false);
+            lock (KinectHandler.instance.depthFrameReady)
+                KinectHandler.instance.depthFrameReady.Add(evt);
+            try
             {
-                jpegByteBuffer = new byte[KinectHandler.instance.nJpegBytes];
-                Buffer.BlockCopy(KinectHandler.instance.jpegByteBuffer, 0, jpegByteBuffer, 0, KinectHandler.instance.nJpegBytes);
-            }
-            return jpegByteBuffer;
-        }
-        
-        [OperationContract]
-        public byte[] LatestAudio()
-        {
-            audioFrameReady.WaitOne();
-            lock (KinectHandler.instance.audioFrameQueues) // overkill?
-            {
-                var buffer = new byte[audioFrameQueue.Count * 1024];
-                int count = audioFrameQueue.Count;
-                for (int i = 0; i < count; i++)
+                evt.WaitOne();
+                byte[] copy;
+                lock (KinectHandler.instance.depthByteBuffer)
                 {
-                    var thisBuffer = audioFrameQueue.Dequeue();
-                    Array.Copy(thisBuffer, 0, buffer, 1024 * i, 1024);
+                    copy = new byte[KinectHandler.instance.depthByteBuffer.Length];
+                    Buffer.BlockCopy(KinectHandler.instance.depthByteBuffer, 0, copy, 0, copy.Length);
                 }
-                return buffer;
+                return Task.FromResult(new ImageReply { Data = ByteString.CopyFrom(copy) });
+            }
+            finally
+            {
+                lock (KinectHandler.instance.depthFrameReady)
+                    KinectHandler.instance.depthFrameReady.Remove(evt);
             }
         }
 
-        [OperationContract]
-        public float LastColorGain()
+        public override Task<ImageReply> LatestYUVImage(Empty request, ServerCallContext context)
         {
-            return KinectHandler.instance.lastColorGain;
+            var evt = new AutoResetEvent(false);
+            lock (KinectHandler.instance.yuvFrameReady)
+                KinectHandler.instance.yuvFrameReady.Add(evt);
+            try
+            {
+                evt.WaitOne();
+                byte[] copy;
+                lock (KinectHandler.instance.yuvByteBuffer)
+                {
+                    copy = new byte[KinectHandler.instance.yuvByteBuffer.Length];
+                    Buffer.BlockCopy(KinectHandler.instance.yuvByteBuffer, 0, copy, 0, copy.Length);
+                }
+                return Task.FromResult(new ImageReply { Data = ByteString.CopyFrom(copy) });
+            }
+            finally
+            {
+                lock (KinectHandler.instance.yuvFrameReady)
+                    KinectHandler.instance.yuvFrameReady.Remove(evt);
+            }
         }
 
-        [OperationContract]
-        public long LastColorExposureTimeTicks()
+        public override Task<ImageReply> LatestRGBImage(Empty request, ServerCallContext context)
         {
-            return KinectHandler.instance.lastColorExposureTimeTicks;
+            var evt = new AutoResetEvent(false);
+            lock (KinectHandler.instance.rgbFrameReady)
+                KinectHandler.instance.rgbFrameReady.Add(evt);
+            try
+            {
+                evt.WaitOne();
+                byte[] copy;
+                lock (KinectHandler.instance.rgbByteBuffer)
+                {
+                    copy = new byte[KinectHandler.instance.rgbByteBuffer.Length];
+                    Buffer.BlockCopy(KinectHandler.instance.rgbByteBuffer, 0, copy, 0, copy.Length);
+                }
+                return Task.FromResult(new ImageReply { Data = ByteString.CopyFrom(copy) });
+            }
+            finally
+            {
+                lock (KinectHandler.instance.rgbFrameReady)
+                    KinectHandler.instance.rgbFrameReady.Remove(evt);
+            }
         }
-        [OperationContract]
-        public Kinect2Calibration GetCalibration()
+
+        public override Task<ImageReply> LatestJPEGImage(Empty request, ServerCallContext context)
         {
-            KinectHandler.instance.kinect2CalibrationReady.WaitOne();
-            return KinectHandler.instance.kinect2Calibration;
+            var evt = new AutoResetEvent(false);
+            lock (KinectHandler.instance.jpegFrameReady)
+                KinectHandler.instance.jpegFrameReady.Add(evt);
+            try
+            {
+                evt.WaitOne();
+                byte[] copy;
+                lock (KinectHandler.instance.jpegByteBuffer)
+                {
+                    copy = new byte[KinectHandler.instance.nJpegBytes];
+                    Buffer.BlockCopy(KinectHandler.instance.jpegByteBuffer, 0, copy, 0, KinectHandler.instance.nJpegBytes);
+                }
+                return Task.FromResult(new ImageReply { Data = ByteString.CopyFrom(copy) });
+            }
+            finally
+            {
+                lock (KinectHandler.instance.jpegFrameReady)
+                    KinectHandler.instance.jpegFrameReady.Remove(evt);
+            }
+        }
+
+        public override Task<ColorGainReply> LastColorGain(Empty request, ServerCallContext context)
+        {
+            return Task.FromResult(new ColorGainReply { Gain = KinectHandler.instance.lastColorGain });
+        }
+
+        public override Task<ExposureTimeTicksReply> LastColorExposureTimeTicks(Empty request, ServerCallContext context)
+        {
+            return Task.FromResult(new ExposureTimeTicksReply { Ticks = KinectHandler.instance.lastColorExposureTimeTicks });
+        }
+
+        public override Task<Kinect2CalibrationData> GetCalibration(Empty request, ServerCallContext context)
+        {
+            var cal = KinectHandler.instance.sensorCalibration;
+
+            var reply = new Kinect2CalibrationData();
+
+            if (cal.ColorCameraMatrix != null)
+                reply.ColorCameraMatrix = ByteString.CopyFrom(MatrixToBytes(cal.ColorCameraMatrix));
+            if (cal.ColorLensDistortion != null)
+                reply.ColorLensDistortion = ByteString.CopyFrom(MatrixToBytes(cal.ColorLensDistortion));
+            if (cal.DepthCameraMatrix != null)
+                reply.DepthCameraMatrix = ByteString.CopyFrom(MatrixToBytes(cal.DepthCameraMatrix));
+            if (cal.DepthLensDistortion != null)
+                reply.DepthLensDistortion = ByteString.CopyFrom(MatrixToBytes(cal.DepthLensDistortion));
+            if (cal.DepthToColorTransform != null)
+                reply.DepthToColorTransform = ByteString.CopyFrom(MatrixToBytes(cal.DepthToColorTransform));
+
+            return Task.FromResult(reply);
+        }
+
+        private static byte[] MatrixToBytes(Matrix m)
+        {
+            int rows = m.Rows;
+            int cols = m.Cols;
+            var bytes = new byte[rows * cols * sizeof(double)];
+            int offset = 0;
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
+                {
+                    var val = BitConverter.GetBytes(m[r, c]);
+                    Buffer.BlockCopy(val, 0, bytes, offset, sizeof(double));
+                    offset += sizeof(double);
+                }
+            return bytes;
         }
     }
 
@@ -405,15 +378,34 @@ namespace RoomAliveToolkit
     {
         static void Main(string[] args)
         {
-            new KinectHandler();
-            var serviceHost = new ServiceHost(typeof(KinectServer2));
+            // TODO: Replace with your actual IDepthSensor implementation, e.g.:
+            //   IDepthSensor sensor = new Kinect2Sensor();
+            //   IDepthSensor sensor = new OrbbecSensor();
+            //   IDepthSensor sensor = new AzureKinectSensor();
+            IDepthSensor sensor = CreateSensor(args);
 
-            // discovery
-            serviceHost.Description.Behaviors.Add(new ServiceDiscoveryBehavior());
-            serviceHost.AddServiceEndpoint(new UdpDiscoveryEndpoint());
+            using (var handler = new KinectHandler(sensor))
+            {
+                var builder = WebApplication.CreateBuilder(args);
+                builder.Services.AddGrpc();
 
-            serviceHost.Open();
-            Console.ReadLine();
+                var app = builder.Build();
+                app.MapGrpcService<KinectServer2Service>();
+
+                app.Urls.Add("http://0.0.0.0:9000");
+
+                Console.WriteLine("KinectServer2 gRPC service listening on port 9000. Press Ctrl+C to stop.");
+                app.Run();
+            }
+        }
+
+        private static IDepthSensor CreateSensor(string[] args)
+        {
+            // Placeholder: in production, select the sensor implementation based on
+            // command-line arguments or configuration.
+            throw new NotImplementedException(
+                "Provide an IDepthSensor implementation. " +
+                "For example, pass a Kinect2Sensor, OrbbecSensor, or AzureKinectSensor instance.");
         }
     }
 }

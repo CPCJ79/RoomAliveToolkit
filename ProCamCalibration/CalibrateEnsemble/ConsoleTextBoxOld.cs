@@ -7,13 +7,16 @@ namespace CommonGUI
 {
     public partial class ConsoleTextBox : UserControl
     {
+        RichTextBox richTextBox1;
         ConsoleRedirection stringRedir;
         public ConsoleTextBox()
         {
-            InitializeComponent();
+            richTextBox1 = new RichTextBox();
+            richTextBox1.Dock = DockStyle.Fill;
+            Controls.Add(richTextBox1);
             stringRedir = new ConsoleRedirection(richTextBox1);
-            Debug.Listeners.Add(new TextWriterTraceListener(Console.Out));
-            Debug.AutoFlush = true; 
+            Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
+            Trace.AutoFlush = true;
             Console.SetOut(stringRedir);
         }
     }

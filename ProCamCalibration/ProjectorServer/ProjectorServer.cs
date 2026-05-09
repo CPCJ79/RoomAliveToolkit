@@ -1,112 +1,140 @@
-﻿using System;
-using System.ServiceModel;
-using System.ServiceModel.Description;
-using System.ServiceModel.Discovery;
-using System.Windows.Forms;
+using System;
 using System.Collections.Generic;
-
-/*
-Generate a client with 
-"C:\Program Files (x86)\Microsoft SDKs\Windows\v8.1A\bin\NETFX 4.5.1 Tools\x64\SvcUtil.exe" /noConfig /out:ProjectorClient.cs http://localhost:8733/Design_Time_Addresses/ProjectorServer/Service1 /reference:"C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.5\System.Drawing.dll"
-*/
-
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
+using RoomAlive.Grpc;
 
 namespace RoomAliveToolkit
 {
-    [ServiceBehavior(ConcurrencyMode = ConcurrencyMode.Multiple, InstanceContextMode = InstanceContextMode.Single)] // TODO: revisit mode
-    [ServiceContract]
-    public class ProjectorServer
+    public class ProjectorServerService : RoomAlive.Grpc.ProjectorServer.ProjectorServerBase
     {
         Dictionary<int, ProjectorForm> projectorForms = new Dictionary<int, ProjectorForm>();
         ProjectorServerForm projectorServerForm;
 
-        public ProjectorServer(ProjectorServerForm form)
+        public ProjectorServerService(ProjectorServerForm form)
         {
             this.projectorServerForm = form;
         }
 
-
-        [OperationContract]
-        public void OpenDisplay(int screenIndex)
+        public override Task<Empty> OpenDisplay(ScreenIndexRequest request, ServerCallContext context)
         {
-            if (!projectorForms.ContainsKey(screenIndex))
+            int screenIndex = request.ScreenIndex;
+            projectorServerForm.Invoke(new Action(() =>
             {
-                var projectorForm = new ProjectorForm(screenIndex);
-                projectorForm.Show();
-                projectorForms[screenIndex] = projectorForm;
-            }
+                if (!projectorForms.ContainsKey(screenIndex))
+                {
+                    var projectorForm = new ProjectorForm(screenIndex);
+                    projectorForm.Show();
+                    projectorForms[screenIndex] = projectorForm;
+                }
+            }));
+            return Task.FromResult(new Empty());
         }
 
-        [OperationContract]
-        public System.Drawing.Size Size(int screenIndex)
+        public override Task<SizeReply> Size(ScreenIndexRequest request, ServerCallContext context)
         {
-            return Screen.AllScreens[screenIndex].Bounds.Size;
+            var size = Screen.AllScreens[request.ScreenIndex].Bounds.Size;
+            return Task.FromResult(new SizeReply { Width = size.Width, Height = size.Height });
         }
 
-        [OperationContract]
-        public int ScreenCount()
+        public override Task<CountReply> ScreenCount(Empty request, ServerCallContext context)
         {
-            return Screen.AllScreens.Length;
+            return Task.FromResult(new CountReply { Count = Screen.AllScreens.Length });
         }
 
-        [OperationContract]
-        public void SetColor(int screenIndex, float r, float g, float b)
+        public override Task<Empty> SetColor(SetColorRequest request, ServerCallContext context)
         {
-            var projectorForm = projectorForms[screenIndex];
-            projectorForm.SetColor(r, g, b);
-        }
-
-        [OperationContract]
-        public void DisplayName(int screenIndex, string name)
-        {
-            var projectorForm = projectorForms[screenIndex];
-            projectorForm.DisplayName(name);
-        }
-
-
-        [OperationContract]
-        public int NumberOfGrayCodeImages(int screenIndex)
-        {
-            var projectorForm = projectorForms[screenIndex];
-            return projectorForm.NumberOfGrayCodeImages;
-        }
-
-        [OperationContract]
-        public void DisplayGrayCode(int screenIndex, int i)
-        {
-            var projectorForm = projectorForms[screenIndex];
-            projectorForm.DisplayGrayCode(i);
-        }
-
-        [OperationContract]
-        public void CloseDisplay(int screenIndex)
-        {
-            if (projectorForms.ContainsKey(screenIndex))
+            projectorServerForm.Invoke(new Action(() =>
             {
-                var projectorForm = projectorForms[screenIndex];
-                projectorServerForm.Invoke(new Action(() => projectorForm.Close()));
-                projectorForms.Remove(screenIndex);
-            }
+                var projectorForm = projectorForms[request.ScreenIndex];
+                projectorForm.SetColor(request.R, request.G, request.B);
+            }));
+            return Task.FromResult(new Empty());
+        }
+
+        public override Task<Empty> DisplayName(DisplayNameRequest request, ServerCallContext context)
+        {
+            projectorServerForm.Invoke(new Action(() =>
+            {
+                var projectorForm = projectorForms[request.ScreenIndex];
+                projectorForm.DisplayName(request.Name);
+            }));
+            return Task.FromResult(new Empty());
+        }
+
+        public override Task<CountReply> NumberOfGrayCodeImages(ScreenIndexRequest request, ServerCallContext context)
+        {
+            int count = 0;
+            projectorServerForm.Invoke(new Action(() =>
+            {
+                var projectorForm = projectorForms[request.ScreenIndex];
+                count = projectorForm.NumberOfGrayCodeImages;
+            }));
+            return Task.FromResult(new CountReply { Count = count });
+        }
+
+        public override Task<Empty> DisplayGrayCode(DisplayGrayCodeRequest request, ServerCallContext context)
+        {
+            projectorServerForm.Invoke(new Action(() =>
+            {
+                var projectorForm = projectorForms[request.ScreenIndex];
+                projectorForm.DisplayGrayCode(request.Index);
+            }));
+            return Task.FromResult(new Empty());
+        }
+
+        public override Task<Empty> CloseDisplay(ScreenIndexRequest request, ServerCallContext context)
+        {
+            projectorServerForm.Invoke(new Action(() =>
+            {
+                int screenIndex = request.ScreenIndex;
+                if (projectorForms.ContainsKey(screenIndex))
+                {
+                    var projectorForm = projectorForms[screenIndex];
+                    projectorForm.Close();
+                    projectorForms.Remove(screenIndex);
+                }
+            }));
+            return Task.FromResult(new Empty());
         }
     }
-
 
     class Program
     {
         static void Main(string[] args)
         {
             var projectorServerForm = new ProjectorServerForm();
-            var projectorServer = new ProjectorServer(projectorServerForm);
-            var serviceHost = new ServiceHost(projectorServer);
+            var service = new ProjectorServerService(projectorServerForm);
 
-            // discovery
-            serviceHost.Description.Behaviors.Add(new ServiceDiscoveryBehavior());
-            serviceHost.AddServiceEndpoint(new UdpDiscoveryEndpoint());
+            // Start gRPC server on a background thread
+            var grpcThread = new Thread(() =>
+            {
+                var builder = WebApplication.CreateBuilder(args);
+                builder.WebHost.ConfigureKestrel(options =>
+                {
+                    options.ListenAnyIP(9001, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http2;
+                    });
+                });
+                builder.Services.AddGrpc();
+                builder.Services.AddSingleton(service);
 
-            serviceHost.Open();
+                var app = builder.Build();
+                app.MapGrpcService<ProjectorServerService>();
+                app.Run();
+            });
+            grpcThread.IsBackground = true;
+            grpcThread.Start();
+
             Application.Run(projectorServerForm);
         }
     }
 }
-
-

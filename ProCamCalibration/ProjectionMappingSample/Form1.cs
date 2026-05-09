@@ -1,8 +1,10 @@
-﻿using SharpDX;
-using SharpDX.Direct3D11;
-using SharpDX.DXGI;
+using Vortice.Direct3D11;
+using Vortice.DXGI;
+using Vortice.Mathematics;
 using System;
+using System.ComponentModel;
 using System.Drawing;
+using System.Numerics;
 using System.Windows.Forms;
 
 namespace RoomAliveToolkit
@@ -13,7 +15,7 @@ namespace RoomAliveToolkit
         {
             InitializeComponent();
         }
-        public Form1(Factory factory, SharpDX.Direct3D11.Device device, Object renderLock)
+        public Form1(IDXGIFactory2 factory, ID3D11Device device, Object renderLock)
         {
             InitializeComponent();
             this.factory = factory;
@@ -32,48 +34,48 @@ namespace RoomAliveToolkit
             var swapChainDesc = new SwapChainDescription()
             {
                 BufferCount = 1,
-                Usage = Usage.RenderTargetOutput,
-                OutputHandle = videoPanel1.Handle,
-                IsWindowed = true,
-                ModeDescription = new ModeDescription(0, 0, new Rational(60, 1), Format.R8G8B8A8_UNorm),
+                BufferUsage = Usage.RenderTargetOutput,
+                OutputWindow = videoPanel1.Handle,
+                Windowed = true,
+                BufferDescription = new ModeDescription(0, 0, new Rational(60, 1), Format.R8G8B8A8_UNorm),
                 Flags = SwapChainFlags.AllowModeSwitch,
                 SwapEffect = SwapEffect.Discard,
                 SampleDescription = new SampleDescription(1, 0),
             };
 
-            swapChain = new SwapChain(factory, device, swapChainDesc);
+            swapChain = new IDXGISwapChain(factory.CreateSwapChain(device, swapChainDesc).NativePointer);
 
             // render target
-            renderTarget = Texture2D.FromSwapChain<Texture2D>(swapChain, 0);
-            renderTargetView = new RenderTargetView(device, renderTarget);
+            renderTarget = swapChain.GetBuffer<ID3D11Texture2D>(0);
+            renderTargetView = device.CreateRenderTargetView(renderTarget);
 
             // depth buffer
             var depthBufferDesc = new Texture2DDescription()
             {
-                Width = videoPanel1.Width,
-                Height = videoPanel1.Height,
+                Width = (uint)videoPanel1.Width,
+                Height = (uint)videoPanel1.Height,
                 MipLevels = 1,
                 ArraySize = 1,
                 Format = Format.D32_Float, // necessary?
                 SampleDescription = new SampleDescription(1, 0),
                 Usage = ResourceUsage.Default,
                 BindFlags = BindFlags.DepthStencil,
-                CpuAccessFlags = CpuAccessFlags.None
+                CPUAccessFlags = CpuAccessFlags.None
             };
-            depthStencil = new Texture2D(device, depthBufferDesc);
-            depthStencilView = new DepthStencilView(device, depthStencil);
+            depthStencil = device.CreateTexture2D(depthBufferDesc);
+            depthStencilView = device.CreateDepthStencilView(depthStencil);
 
             // viewport
             viewport = new Viewport(0, 0, videoPanel1.Width, videoPanel1.Height, 0f, 1f);
         }
 
-        SharpDX.Direct3D11.Device device;
-        Factory factory;
-        Texture2D renderTarget, depthStencil;
-        public RenderTargetView renderTargetView;
-        public DepthStencilView depthStencilView;
+        ID3D11Device device;
+        IDXGIFactory2 factory;
+        ID3D11Texture2D renderTarget, depthStencil;
+        public ID3D11RenderTargetView renderTargetView;
+        public ID3D11DepthStencilView depthStencilView;
         public Viewport viewport;
-        public SwapChain swapChain;
+        public IDXGISwapChain swapChain;
         Object renderLock;
 
         private void videoPanel1_SizeChanged(object sender, EventArgs e)
@@ -88,26 +90,26 @@ namespace RoomAliveToolkit
                     depthStencilView.Dispose();
                     depthStencil.Dispose();
 
-                    swapChain.ResizeBuffers(1, videoPanel1.Width, videoPanel1.Height, Format.Unknown, SwapChainFlags.AllowModeSwitch);
+                    swapChain.ResizeBuffers(1, (uint)videoPanel1.Width, (uint)videoPanel1.Height, Format.Unknown, SwapChainFlags.AllowModeSwitch);
 
-                    renderTarget = Texture2D.FromSwapChain<Texture2D>(swapChain, 0);
-                    renderTargetView = new RenderTargetView(device, renderTarget);
+                    renderTarget = swapChain.GetBuffer<ID3D11Texture2D>(0);
+                    renderTargetView = device.CreateRenderTargetView(renderTarget);
 
                     // depth buffer
                     var depthBufferDesc = new Texture2DDescription()
                     {
-                        Width = videoPanel1.Width,
-                        Height = videoPanel1.Height,
+                        Width = (uint)videoPanel1.Width,
+                        Height = (uint)videoPanel1.Height,
                         MipLevels = 1,
                         ArraySize = 1,
                         Format = Format.D32_Float, // necessary?
                         SampleDescription = new SampleDescription(1, 0),
                         Usage = ResourceUsage.Default,
                         BindFlags = BindFlags.DepthStencil,
-                        CpuAccessFlags = CpuAccessFlags.None
+                        CPUAccessFlags = CpuAccessFlags.None
                     };
-                    depthStencil = new Texture2D(device, depthBufferDesc);
-                    depthStencilView = new DepthStencilView(device, depthStencil);
+                    depthStencil = device.CreateTexture2D(depthBufferDesc);
+                    depthStencilView = device.CreateDepthStencilView(depthStencil);
 
                     // viewport
                     viewport = new Viewport(0, 0, videoPanel1.Width, videoPanel1.Height, 0f, 1f);
@@ -117,16 +119,17 @@ namespace RoomAliveToolkit
 
     public class ProjectorForm : Form1
     {
-        public ProjectorForm(Factory factory, SharpDX.Direct3D11.Device device, Object renderLock, ProjectorCameraEnsemble.Projector projector) : base(factory, device, renderLock)
+        public ProjectorForm(IDXGIFactory2 factory, ID3D11Device device, Object renderLock, ProjectorCameraEnsemble.Projector projector) : base(factory, device, renderLock)
         {
             this.projector = projector;
             Text = "Projector " + projector.name;
         }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool FullScreen
         {
             get { return fullScreen; }
-            set 
+            set
             {
                 if (value)
                 {
@@ -136,7 +139,7 @@ namespace RoomAliveToolkit
                     var bounds = Screen.AllScreens[projector.displayIndex].Bounds; // TODO: catch the case where the display is not available
                     StartPosition = FormStartPosition.Manual;
                     Location = new System.Drawing.Point(bounds.X, bounds.Y);
-                    Size = new Size(bounds.Width, bounds.Height);
+                    Size = new System.Drawing.Size(bounds.Width, bounds.Height);
                 }
                 else
                 {
@@ -151,7 +154,7 @@ namespace RoomAliveToolkit
 
         bool fullScreen = false;
         System.Drawing.Point windowedLocation;
-        Size windowedSize;
+        System.Drawing.Size windowedSize;
 
         protected override void OnLoad(EventArgs e)
         {
@@ -162,12 +165,12 @@ namespace RoomAliveToolkit
             windowedSize = Size;
 
             // pick up view and projection for projector
-            view = new SharpDX.Matrix();
+            view = new Matrix4x4();
             for (int i = 0; i < 4; i++)
                 for (int j = 0; j < 4; j++)
                     view[i, j] = (float)projector.pose[i, j];
-            view.Invert();
-            view.Transpose();
+            Matrix4x4.Invert(view, out view);
+            view = Matrix4x4.Transpose(view);
 
             var cameraMatrix = projector.cameraMatrix;
             float fx = (float)cameraMatrix[0, 0];
@@ -182,14 +185,13 @@ namespace RoomAliveToolkit
             float h = projector.height;
 
             projection = GraphicsTransforms.ProjectionMatrixFromCameraMatrix(fx, fy, cx, cy, w, h, near, far);
-            projection.Transpose();
+            projection = Matrix4x4.Transpose(projection);
         }
 
         ProjectorCameraEnsemble.Projector projector;
-        public SharpDX.Matrix view, projection;
+        public Matrix4x4 view, projection;
 
     }
 
 
 }
- 
