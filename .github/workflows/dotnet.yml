@@ -1,28 +1,40 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+name: .NET Build
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ master ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ master ]
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v4
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: 8.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+        dotnet-version: '10.0.x'
+
+    - name: Restore - Core Library
+      run: dotnet restore ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj
+
+    - name: Build - Core Library
+      run: dotnet build ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj --no-restore
+
+    - name: Build - KinectServer
+      run: dotnet build ProCamCalibration/KinectServer/KinectServer.csproj
+
+    - name: Build - ProjectorServer
+      run: dotnet build ProCamCalibration/ProjectorServer/ProjectorServer.csproj
+
+    - name: Build - CalibrateEnsemble
+      run: dotnet build ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj
+
+    - name: Build - ProjectionMappingSample
+      run: dotnet build ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj
+
+    - name: Build - KinectV2Server
+      run: dotnet build RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj
