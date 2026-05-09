@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Publish - Core Library
+      run: dotnet publish ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj -c Release -o publish/ProCamEnsembleCalibrationLib
+
+    - name: Publish - KinectServer
+      run: dotnet publish ProCamCalibration/KinectServer/KinectServer.csproj -c Release -o publish/KinectServer --self-contained false
+
+    - name: Publish - ProjectorServer
+      run: dotnet publish ProCamCalibration/ProjectorServer/ProjectorServer.csproj -c Release -o publish/ProjectorServer --self-contained false
+
+    - name: Publish - CalibrateEnsemble
+      run: dotnet publish ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj -c Release -o publish/CalibrateEnsemble --self-contained false
+
+    - name: Publish - ProjectionMappingSample
+      run: dotnet publish ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj -c Release -o publish/ProjectionMappingSample --self-contained false
+
+    - name: Publish - KinectV2Server
+      run: dotnet publish RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj -c Release -o publish/KinectV2Server --self-contained false
+
+    - name: Package - ProCamCalibration
+      run: Compress-Archive -Path publish/KinectServer, publish/ProjectorServer, publish/CalibrateEnsemble, publish/ProjectionMappingSample, publish/ProCamEnsembleCalibrationLib -DestinationPath publish/ProCamCalibration-${{ github.ref_name }}.zip
+      shell: pwsh
+
+    - name: Package - KinectV2Server
+      run: Compress-Archive -Path publish/KinectV2Server -DestinationPath publish/KinectV2Server-${{ github.ref_name }}.zip
+      shell: pwsh
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+        files: |
+          publish/ProCamCalibration-${{ github.ref_name }}.zip
+          publish/KinectV2Server-${{ github.ref_name }}.zip

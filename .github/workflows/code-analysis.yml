@@ -1,0 +1,76 @@
+name: Code Analysis
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  analyze:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore - All Projects
+      run: |
+        dotnet restore ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj
+        dotnet restore ProCamCalibration/KinectServer/KinectServer.csproj
+        dotnet restore ProCamCalibration/ProjectorServer/ProjectorServer.csproj
+        dotnet restore ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj
+        dotnet restore ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj
+        dotnet restore RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj
+
+    - name: Build with Analysis
+      run: |
+        $projects = @(
+          "ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj",
+          "ProCamCalibration/KinectServer/KinectServer.csproj",
+          "ProCamCalibration/ProjectorServer/ProjectorServer.csproj",
+          "ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj",
+          "ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj",
+          "RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj"
+        )
+
+        $failed = $false
+        foreach ($proj in $projects) {
+          Write-Host "::group::Analyzing $proj"
+          dotnet build $proj --no-restore -warnaserror -p:TreatWarningsAsErrors=true 2>&1
+          if ($LASTEXITCODE -ne 0) { $failed = $true }
+          Write-Host "::endgroup::"
+        }
+
+        if ($failed) { exit 1 }
+      shell: pwsh
+
+    - name: Check for Security Hotspots
+      run: |
+        Write-Host "Checking for common security patterns..."
+
+        $issues = @()
+
+        # Check for hardcoded credentials
+        $creds = Select-String -Path "**/*.cs" -Pattern '(password|secret|apikey|token)\s*=\s*"[^"]+' -AllMatches -CaseSensitive:$false 2>$null
+        if ($creds) { $issues += $creds }
+
+        # Check for SQL injection patterns
+        $sql = Select-String -Path "**/*.cs" -Pattern 'string\.Format.*SELECT|"SELECT.*\+' -AllMatches 2>$null
+        if ($sql) { $issues += $sql }
+
+        # Check for unsafe deserialization
+        $deser = Select-String -Path "**/*.cs" -Pattern 'BinaryFormatter|SoapFormatter|ObjectStateFormatter|LosFormatter|NetDataContractSerializer' -AllMatches 2>$null
+        if ($deser) { $issues += $deser }
+
+        if ($issues.Count -gt 0) {
+          Write-Host "::warning::Found $($issues.Count) potential security hotspot(s):"
+          $issues | ForEach-Object { Write-Host "  $_" }
+        } else {
+          Write-Host "No security hotspots found."
+        }
+      shell: pwsh

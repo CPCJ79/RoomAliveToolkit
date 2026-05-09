@@ -1,0 +1,73 @@
+name: Shader Compilation
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'ProCamCalibration/Shaders/**'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'ProCamCalibration/Shaders/**'
+  workflow_dispatch:
+
+jobs:
+  compile-shaders:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create output directory
+      run: mkdir -p ProCamCalibration/Shaders/Output
+      shell: bash
+
+    - name: Compile Vertex Shaders
+      run: |
+        $shaders = @(
+          @{ Source="DepthAndColorVS.hlsl";          Target="DepthAndColorVS.cso";          Profile="vs_5_0" },
+          @{ Source="DepthAndColorFloatVS.hlsl";     Target="DepthAndColorFloatVS.cso";     Profile="vs_5_0" },
+          @{ Source="DepthAndProjectiveTextureVS.hlsl"; Target="DepthAndProjectiveTextureVS.cso"; Profile="vs_5_0" },
+          @{ Source="FullScreenQuadVS.hlsl";         Target="FullScreenQuadVS.cso";         Profile="vs_5_0" },
+          @{ Source="MeshVS.hlsl";                   Target="MeshVS.cso";                   Profile="vs_5_0" }
+        )
+
+        foreach ($s in $shaders) {
+          Write-Host "Compiling $($s.Source) -> $($s.Target)"
+          fxc.exe /T $($s.Profile) /Fo "ProCamCalibration/Shaders/Output/$($s.Target)" "ProCamCalibration/Shaders/$($s.Source)"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to compile $($s.Source)" }
+        }
+      shell: pwsh
+
+    - name: Compile Geometry Shaders
+      run: |
+        Write-Host "Compiling DepthAndColorGS.hlsl"
+        fxc.exe /T gs_5_0 /Fo "ProCamCalibration/Shaders/Output/DepthAndColorGS.cso" "ProCamCalibration/Shaders/DepthAndColorGS.hlsl"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to compile DepthAndColorGS.hlsl" }
+      shell: pwsh
+
+    - name: Compile Pixel Shaders
+      run: |
+        $shaders = @(
+          @{ Source="DepthAndColorPS.hlsl";    Target="DepthAndColorPS.cso" },
+          @{ Source="MeshPS.hlsl";             Target="MeshPS.cso" },
+          @{ Source="MeshWithTexturePS.hlsl";  Target="MeshWithTexturePS.cso" },
+          @{ Source="BilateralFilterPS.hlsl";  Target="BilateralFilterPS.cso" },
+          @{ Source="FromUIntPS.hlsl";         Target="FromUIntPS.cso" },
+          @{ Source="PassThroughPS.hlsl";      Target="PassThroughPS.cso" },
+          @{ Source="RadialWobblePS.hlsl";     Target="RadialWobblePS.cso" }
+        )
+
+        foreach ($s in $shaders) {
+          Write-Host "Compiling $($s.Source) -> $($s.Target)"
+          fxc.exe /T ps_5_0 /Fo "ProCamCalibration/Shaders/Output/$($s.Target)" "ProCamCalibration/Shaders/$($s.Source)"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to compile $($s.Source)" }
+        }
+      shell: pwsh
+
+    - name: Upload Compiled Shaders
+      uses: actions/upload-artifact@v4
+      with:
+        name: compiled-shaders
+        path: ProCamCalibration/Shaders/Output/*.cso
+        retention-days: 90

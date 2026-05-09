@@ -1,0 +1,125 @@
+name: Dependency Audit
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Monday at 8am UTC
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore All Projects
+      run: |
+        dotnet restore ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj
+        dotnet restore ProCamCalibration/KinectServer/KinectServer.csproj
+        dotnet restore ProCamCalibration/ProjectorServer/ProjectorServer.csproj
+        dotnet restore ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj
+        dotnet restore ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj
+        dotnet restore RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj
+
+    - name: Check for Vulnerable Packages
+      run: |
+        $projects = @(
+          "ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj",
+          "ProCamCalibration/KinectServer/KinectServer.csproj",
+          "ProCamCalibration/ProjectorServer/ProjectorServer.csproj",
+          "ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj",
+          "ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj",
+          "RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj"
+        )
+
+        $hasVulnerabilities = $false
+        foreach ($proj in $projects) {
+          Write-Host "::group::Auditing $(Split-Path $proj -Leaf)"
+          $output = dotnet list $proj package --vulnerable --include-transitive 2>&1
+          Write-Host $output
+          if ($output -match "has the following vulnerable packages") {
+            $hasVulnerabilities = $true
+            Write-Host "::error::Vulnerable packages found in $proj"
+          }
+          Write-Host "::endgroup::"
+        }
+
+        if ($hasVulnerabilities) {
+          Write-Host "::error::One or more projects have vulnerable dependencies. See details above."
+          exit 1
+        } else {
+          Write-Host "No vulnerable packages found."
+        }
+      shell: pwsh
+
+    - name: Check for Outdated Packages
+      run: |
+        $projects = @(
+          "ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj",
+          "ProCamCalibration/KinectServer/KinectServer.csproj",
+          "ProCamCalibration/ProjectorServer/ProjectorServer.csproj",
+          "ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj",
+          "ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj",
+          "RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj"
+        )
+
+        foreach ($proj in $projects) {
+          Write-Host "::group::Outdated packages in $(Split-Path $proj -Leaf)"
+          dotnet list $proj package --outdated 2>&1
+          Write-Host "::endgroup::"
+        }
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Generate SBOM
+      run: |
+        $projects = @(
+          "ProCamCalibration/ProCamEnsembleCalibration/ProCamEnsembleCalibrationLib.csproj",
+          "ProCamCalibration/KinectServer/KinectServer.csproj",
+          "ProCamCalibration/ProjectorServer/ProjectorServer.csproj",
+          "ProCamCalibration/CalibrateEnsemble/CalibrateEnsemble.csproj",
+          "ProCamCalibration/ProjectionMappingSample/ProjectionMappingSample.csproj",
+          "RoomAliveToolkitForUnity/RoomAliveKinectServer/KinectV2Server/KinectV2Server.csproj"
+        )
+
+        $sbom = @()
+        foreach ($proj in $projects) {
+          $name = Split-Path (Split-Path $proj) -Leaf
+          $packages = dotnet list $proj package --format json 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+          if ($packages) {
+            foreach ($framework in $packages.projects.frameworks) {
+              foreach ($pkg in $framework.topLevelPackages) {
+                $sbom += [PSCustomObject]@{
+                  Project = $name
+                  Package = $pkg.id
+                  Version = $pkg.resolvedVersion
+                }
+              }
+            }
+          }
+        }
+
+        $sbom | Format-Table -AutoSize
+        $sbom | ConvertTo-Json | Out-File -FilePath dependency-report.json
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Upload Dependency Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-report
+        path: dependency-report.json
+        retention-days: 30
