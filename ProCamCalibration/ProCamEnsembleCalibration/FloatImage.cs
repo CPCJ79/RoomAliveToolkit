@@ -97,6 +97,47 @@ namespace RoomAliveToolkit
         }
 
 
+        public void SetTo(float value)
+        {
+            float* p = data;
+            for (int i = 0; i < width * height; i++)
+                *p++ = value;
+        }
+
+        public void Add(FloatImage other)
+        {
+            float* p = data;
+            float* po = other.data;
+            for (int i = 0; i < width * height; i++)
+                *p++ += *po++;
+        }
+
+        public void Add(ShortImage other)
+        {
+            float* p = data;
+            ushort* po = other.Data(0, 0);
+            for (int i = 0; i < width * height; i++)
+                *p++ += *po++;
+        }
+
+        public void Mult(FloatImage other)
+        {
+            float* p = data;
+            float* po = other.data;
+            for (int i = 0; i < width * height; i++)
+                *p++ *= *po++;
+        }
+
+        public void Mult(float scalar)
+        {
+            float* p = data;
+            for (int i = 0; i < width * height; i++)
+            {
+                *p = *p * scalar;
+                p++;
+            }
+        }
+
         public void Blur3x3(FloatImage a)
         {
             float* output = data + width + 1;

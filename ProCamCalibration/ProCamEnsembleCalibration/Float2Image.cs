@@ -108,19 +108,21 @@ namespace RoomAliveToolkit
 
         public float[] ToArray()
         {
-            float[] arr = new float[width * height * 2];
+            int count = width * height * 2;
+            float[] arr = new float[count];
             fixed (float* p = arr)
             {
-                CopyTo((IntPtr)p);
+                Buffer.MemoryCopy(data, p, count * sizeof(float), count * sizeof(float));
             }
             return arr;
         }
 
         public void FromArray(float[] arr)
         {
+            int count = width * height * 2;
             fixed (float* p = arr)
             {
-                Copy((IntPtr)p);
+                Buffer.MemoryCopy(p, data, count * sizeof(float), count * sizeof(float));
             }
         }
     }

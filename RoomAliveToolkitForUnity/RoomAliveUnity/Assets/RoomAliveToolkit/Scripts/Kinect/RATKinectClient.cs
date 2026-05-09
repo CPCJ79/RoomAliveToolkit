@@ -4,8 +4,6 @@ using System.Runtime.InteropServices;
 using System;
 using System.IO;
 using System.Threading;
-using System.Runtime.Serialization;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Collections.Generic;
 using System.Text;
 using System.Xml.Serialization;
@@ -156,7 +154,6 @@ namespace RoomAliveToolkit
         // For file streaming of Kinect data
         private string depthPath, rgbPath, audioPath, skeletonPath, depthToCameraTablePath, kinectCalibrationPath;
         private Thread kinectFileStreamerThread = null;
-        private IFormatter formatter;
         private Stream depthStream, rgbStream, audioStream, skeletonStream;
         private double streamTime = 0;
         private long pendingDepthTimeStamp, pendingRGBTimeStamp, pendingAudioTimeStamp, pendingSkeletonTimeStamp ;
@@ -206,7 +203,8 @@ namespace RoomAliveToolkit
         private const int AudioChannels = 1;
         private const int AudioFrameSize = AudioChannels * AudioSamplesPerSecond * AudioBitsPerSample / 8 ; //bytes = 44100 * (16/8) * 1 (channel)
 
-        private int DepthFrameSize = 434296;
+        // Frame size for seek calculations: 8 (timestamp) + 4 (length prefix) + 2*512*424 (depth data) = 434188 bytes
+        private int DepthFrameSize = 434188;
         private Matrix4x4 localToWorldMatrix;   
 
         // For detecting frame dropping issues
@@ -505,7 +503,6 @@ namespace RoomAliveToolkit
             // Set up serialization of Kinect data
             if (StreamToFile)
             {
-                formatter = new BinaryFormatter();
                 try
                 {
                     depthStream = new FileStream(depthPath, FileMode.Create);
@@ -584,7 +581,6 @@ namespace RoomAliveToolkit
 
         private void _InitStreamFromFile()
         {
-            formatter = new BinaryFormatter();
             bool preLoad = streamingMode != FileStreamingMode.ReadPreloaded;
             // Open streams for depth, color, and skeleton
 
@@ -713,7 +709,7 @@ namespace RoomAliveToolkit
                     if (depthStream.Position == streamStartSample)
                     {
                         // Streaming just started, get first depth frame
-                        pendingDepthFrame = (KinectDepthFrame)formatter.Deserialize(depthStream);
+                        pendingDepthFrame = FrameSerializer.DeserializeDepthFrame(depthStream);
                         pendingDepthTimeStamp = pendingDepthFrame.timeStampDepth;
                         pendingDepthFrameDeserialized = true;
 
@@ -744,7 +740,7 @@ namespace RoomAliveToolkit
                         depthStream != null && depthStream.Position < depthStream.Length)
                     {
                         // Get the next depth frame
-                        pendingDepthFrame = (KinectDepthFrame)formatter.Deserialize(depthStream);
+                        pendingDepthFrame = FrameSerializer.DeserializeDepthFrame(depthStream);
                         pendingDepthTimeStamp = pendingDepthFrame.timeStampDepth;
 
                         if (streamTime >= (double)pendingDepthTimeStamp)
@@ -791,7 +787,7 @@ namespace RoomAliveToolkit
                         // Get the next color frame
                         do
                         {
-                            pendingRGBFrame = (KinectRGBFrame)formatter.Deserialize(rgbStream);
+                            pendingRGBFrame = FrameSerializer.DeserializeRGBFrame(rgbStream);
                         } while (pendingRGBFrame.timeStampRGB <= streamTime);
                         pendingRGBTimeStamp = pendingRGBFrame.timeStampRGB;
                         pendingRGBFrameDeserialized = true;
@@ -821,7 +817,7 @@ namespace RoomAliveToolkit
                         // Get the next skeleton frame
                         do
                         {
-                            pendingSkeletonFrame = (KinectSkeletonFrame)formatter.Deserialize(skeletonStream);
+                            pendingSkeletonFrame = FrameSerializer.DeserializeSkeletonFrame(skeletonStream);
                         } while (pendingSkeletonFrame.timeStampSkeleton <= streamTime);
                         pendingSkeletonTimeStamp = pendingSkeletonFrame.timeStampSkeleton;
                         pendingSkeletonFrameDeserialized = true;
@@ -852,7 +848,7 @@ namespace RoomAliveToolkit
                         audioStream != null && audioStream.Position < audioStream.Length)
                     {
                         // Get the next audio frame
-                        do { pendingAudioFrame = (AudioFrame)formatter.Deserialize(audioStream); }
+                        do { pendingAudioFrame = FrameSerializer.DeserializeAudioFrame(audioStream); }
                         while (pendingAudioFrame.timeStampAudio <= streamTime);
                         pendingAudioTimeStamp = pendingAudioFrame.timeStampAudio;
                         pendingAudioFrameDeserialized = true;
@@ -1087,7 +1083,7 @@ namespace RoomAliveToolkit
                 if (StreamToFile) //if (mProCamUnit.SerializeKinectData)
                 {
                     // Serialize depth frame to file
-                    formatter.Serialize(depthStream, nextDepthFrame);
+                    FrameSerializer.Serialize(depthStream, nextDepthFrame);
                     ++numFramesSerialized;
                 }
             }
@@ -1118,7 +1114,7 @@ namespace RoomAliveToolkit
                 if (StreamToFile) //if (mProCamUnit.SerializeKinectData)
                 {
                     // Serialize depth frame to file
-                    formatter.Serialize(rgbStream, nextRGBFrame);
+                    FrameSerializer.Serialize(rgbStream, nextRGBFrame);
                     ++numRGBFramesSerialized;
                 }
             }
@@ -1228,7 +1224,7 @@ namespace RoomAliveToolkit
                 if (StreamToFile) 
                 {
                     // Write the audio frame to file
-                    formatter.Serialize(audioStream, nextAudioFrame);
+                    FrameSerializer.Serialize(audioStream, nextAudioFrame);
                 }
                 if (writeAudioToWav) 
                 {
@@ -1327,7 +1323,7 @@ namespace RoomAliveToolkit
                 if (StreamToFile)
                 {
                     // Serialize skeleton frame to file
-                    formatter.Serialize(skeletonStream, nextSkeletonFrame);
+                    FrameSerializer.Serialize(skeletonStream, nextSkeletonFrame);
                 }
             }
 
@@ -1488,40 +1484,202 @@ namespace RoomAliveToolkit
 
 
     #region Serialization Helper stuff
-    [Serializable]
+
+    /// <summary>
+    /// Provides manual binary serialization methods, replacing the removed BinaryFormatter.
+    /// </summary>
+    public static class FrameSerializer
+    {
+        public static void Serialize(Stream stream, KinectDepthFrame frame)
+        {
+            var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            writer.Write(frame.timeStampDepth);
+            int len = frame.depthData != null ? frame.depthData.Length : 0;
+            writer.Write(len);
+            if (len > 0)
+                writer.Write(frame.depthData);
+            writer.Flush();
+        }
+
+        public static KinectDepthFrame DeserializeDepthFrame(Stream stream)
+        {
+            var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            var frame = new KinectDepthFrame(RATKinectClient.depthWidth, RATKinectClient.depthHeight);
+            frame.timeStampDepth = reader.ReadInt64();
+            int len = reader.ReadInt32();
+            frame.depthData = len > 0 ? reader.ReadBytes(len) : null;
+            return frame;
+        }
+
+        public static void Serialize(Stream stream, KinectRGBFrame frame)
+        {
+            var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            writer.Write(frame.timeStampRGB);
+            writer.Write(frame.type);
+            writer.Write(frame.length);
+            int dataLen = frame.rgbData != null ? frame.rgbData.Length : 0;
+            writer.Write(dataLen);
+            if (dataLen > 0)
+                writer.Write(frame.rgbData);
+            writer.Flush();
+        }
+
+        public static KinectRGBFrame DeserializeRGBFrame(Stream stream)
+        {
+            var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            var frame = new KinectRGBFrame(0, 0); // sizes will be set from data
+            frame.timeStampRGB = reader.ReadInt64();
+            frame.type = reader.ReadInt32();
+            frame.length = reader.ReadInt32();
+            int dataLen = reader.ReadInt32();
+            frame.rgbData = dataLen > 0 ? reader.ReadBytes(dataLen) : new byte[0];
+            return frame;
+        }
+
+        public static void Serialize(Stream stream, AudioFrame frame)
+        {
+            var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            writer.Write(frame.timeStampAudio);
+            int len = frame.audioData != null ? frame.audioData.Length : 0;
+            writer.Write(len);
+            if (len > 0)
+                writer.Write(frame.audioData);
+            writer.Flush();
+        }
+
+        public static AudioFrame DeserializeAudioFrame(Stream stream)
+        {
+            var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            var frame = new AudioFrame();
+            frame.timeStampAudio = reader.ReadInt64();
+            int len = reader.ReadInt32();
+            frame.audioData = len > 0 ? reader.ReadBytes(len) : new byte[0];
+            return frame;
+        }
+
+        public static void Serialize(Stream stream, KinectSkeletonFrame frame)
+        {
+            var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            writer.Write(frame.timeStampSkeleton);
+            writer.Write(frame.validBodiesCount);
+            writer.Write(frame.skeletons.Count);
+            foreach (var skeleton in frame.skeletons)
+            {
+                WriteSkeleton(writer, skeleton);
+            }
+            writer.Flush();
+        }
+
+        public static KinectSkeletonFrame DeserializeSkeletonFrame(Stream stream)
+        {
+            var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            var frame = new KinectSkeletonFrame();
+            frame.timeStampSkeleton = reader.ReadInt64();
+            frame.validBodiesCount = reader.ReadByte();
+            int count = reader.ReadInt32();
+            frame.skeletons = new List<RATKinectSkeleton>(count);
+            for (int i = 0; i < count; i++)
+            {
+                frame.skeletons.Add(ReadSkeleton(reader));
+            }
+            return frame;
+        }
+
+        private static void WriteSkeleton(BinaryWriter writer, RATKinectSkeleton skeleton)
+        {
+            writer.Write(skeleton.valid);
+            writer.Write(skeleton.ID);
+            writer.Write(skeleton.handLeftConfidence);
+            writer.Write(skeleton.handRightConfidence);
+            writer.Write(skeleton.handLeftState);
+            writer.Write(skeleton.handRightState);
+
+            for (int i = 0; i < RATKinectSkeleton.JOINT_COUNT; i++)
+            {
+                writer.Write(skeleton.jointPositions3D[i].x);
+                writer.Write(skeleton.jointPositions3D[i].y);
+                writer.Write(skeleton.jointPositions3D[i].z);
+            }
+            for (int i = 0; i < RATKinectSkeleton.JOINT_COUNT; i++)
+            {
+                writer.Write((int)skeleton.jointStates[i]);
+            }
+
+            for (int i = 0; i < RATKinectSkeleton.FACE_POSITION_COUNT; i++)
+            {
+                writer.Write(skeleton.facePositions3D[i].x);
+                writer.Write(skeleton.facePositions3D[i].y);
+                writer.Write(skeleton.facePositions3D[i].z);
+            }
+            writer.Write(skeleton.faceOrientationYPR.x);
+            writer.Write(skeleton.faceOrientationYPR.y);
+            writer.Write(skeleton.faceOrientationYPR.z);
+        }
+
+        private static RATKinectSkeleton ReadSkeleton(BinaryReader reader)
+        {
+            var skeleton = new RATKinectSkeleton();
+            skeleton.valid = reader.ReadBoolean();
+            skeleton.ID = reader.ReadUInt64();
+            skeleton.handLeftConfidence = reader.ReadByte();
+            skeleton.handRightConfidence = reader.ReadByte();
+            skeleton.handLeftState = reader.ReadByte();
+            skeleton.handRightState = reader.ReadByte();
+
+            for (int i = 0; i < RATKinectSkeleton.JOINT_COUNT; i++)
+            {
+                skeleton.jointPositions3D[i] = new Vector3(
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle());
+            }
+            for (int i = 0; i < RATKinectSkeleton.JOINT_COUNT; i++)
+            {
+                skeleton.jointStates[i] = (RATKinectSkeleton.TrackingState)reader.ReadInt32();
+            }
+
+            for (int i = 0; i < RATKinectSkeleton.FACE_POSITION_COUNT; i++)
+            {
+                skeleton.facePositions3D[i] = new Vector3(
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle());
+            }
+            skeleton.faceOrientationYPR = new Vector3(
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle());
+            skeleton.faceOrientation = Quaternion.Euler(skeleton.faceOrientationYPR);
+            return skeleton;
+        }
+    }
+
     public class KinectDepthFrame
     {
         public KinectDepthFrame(int depthImageWidth, int depthImageHeight)
         {
             depthImage = new ShortImage(depthImageWidth, depthImageHeight);
-
         }
 
         public long timeStampDepth;
         public byte[] depthData;
-
-
-        [NonSerializedAttribute]
         public ShortImage depthImage;
-
     }
 
-    [Serializable]
     public class KinectRGBFrame
     {
         public KinectRGBFrame(int colorImageWidth, int colorImageHeight)
         {
-            rgbData = new byte[colorImageHeight * colorImageWidth*4];
+            rgbData = new byte[colorImageHeight * colorImageWidth * 4];
             length = colorImageHeight * colorImageWidth * 4; //default
         }
 
         public long timeStampRGB;
-        public int type; 
+        public int type;
         public byte[] rgbData;
-        public int length;    
+        public int length;
     }
 
-    [Serializable]
     public class AudioFrame
     {
         public AudioFrame()
@@ -1532,9 +1690,6 @@ namespace RoomAliveToolkit
         public byte[] audioData;
     }
 
-
-
-    [Serializable]
     public class KinectSkeletonFrame
     {
         public KinectSkeletonFrame()
@@ -1546,10 +1701,7 @@ namespace RoomAliveToolkit
         public long timeStampSkeleton;
         public byte validBodiesCount;
         public List<RATKinectSkeleton> skeletons;
-
-        [NonSerializedAttribute]
         public Vector3 deviceAcceleration = new Vector3();
-        [NonSerializedAttribute]
         public bool flipped = false;
     }
 

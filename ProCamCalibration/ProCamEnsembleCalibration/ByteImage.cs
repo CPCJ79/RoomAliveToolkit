@@ -212,6 +212,43 @@ namespace RoomAliveToolkit
             }
         }
 
+        public void SetTo(byte value)
+        {
+            byte* p = data;
+            for (int i = 0; i < width * height; i++)
+                *p++ = value;
+        }
+
+        public void And(ByteImage other)
+        {
+            byte* p = data;
+            byte* po = other.data;
+            for (int i = 0; i < width * height; i++)
+            {
+                *p = (byte)(*p & *po);
+                p++;
+                po++;
+            }
+        }
+
+        public void Mult(byte scalar)
+        {
+            byte* p = data;
+            for (int i = 0; i < width * height; i++)
+            {
+                int val = *p * scalar;
+                *p++ = (val > 255) ? (byte)255 : (byte)val;
+            }
+        }
+
+        public void Copy(ByteImage a)
+        {
+            byte* pa = a.data;
+            byte* p = data;
+            for (int i = 0; i < width * height; i++)
+                *p++ = *pa++;
+        }
+
 
     }
 }

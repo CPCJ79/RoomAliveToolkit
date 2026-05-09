@@ -1,6 +1,4 @@
-﻿#define UNITY_5_1
-
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Serialization;
@@ -79,15 +77,9 @@ public class RATMoveGameWindowEditor: EditorWindow
     {
         try
         {
-#if UNITY_5_1
             return (from window in Resources.FindObjectsOfTypeAll<EditorWindow>()
                     where window.titleContent.text == "Game"
                     select window).Single();
-#else
-            return (from window in Resources.FindObjectsOfTypeAll<EditorWindow>()
-                    where window.title == "UnityEditor.GameView"
-                    select window).Single();
-#endif
         }
         catch (Exception)
         {

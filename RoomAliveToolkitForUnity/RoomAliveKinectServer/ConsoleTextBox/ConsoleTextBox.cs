@@ -12,8 +12,8 @@ namespace ConsoleTextBox
         {
             InitializeComponent();
             stringRedir = new ConsoleRedirection(richTextBox1);
-            Debug.Listeners.Add(new TextWriterTraceListener(Console.Out));
-            Debug.AutoFlush = true; 
+            Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
+            Trace.AutoFlush = true;
             Console.SetOut(stringRedir);
         }
     }

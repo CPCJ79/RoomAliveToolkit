@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.Serialization;
-using System.Security.Permissions;
 using System.Text;
 using UnityEngine;
 
@@ -163,8 +161,7 @@ namespace RoomAliveToolkit
     /// <summary>
     /// Data container for a tracked kinect skeleton with human topology
     /// </summary>
-    [Serializable]
-    public class RATKinectSkeleton : ISerializable
+    public class RATKinectSkeleton
     {
 
         public static string GetJointName(JointType jointType)
@@ -178,9 +175,7 @@ namespace RoomAliveToolkit
                 return "<unknown>";
             return HumanTopology.JOINT_NAMES[jointIndex];
         }
-        [NonSerializedAttribute]
         public const int JOINT_COUNT = 25;
-        [NonSerializedAttribute]
         public const int FACE_POSITION_COUNT = 5;
 
         public Vector3 headPos
@@ -259,84 +254,9 @@ namespace RoomAliveToolkit
             return pos.magnitude < 100000;
         }
 
-        /// <summary>
-        /// Helper struct to enable serialization of Unity Vector3.
-        /// </summary>
-        [Serializable]
-        public struct SerializableVector3
-        {
-            public float x;
-            public float y;
-            public float z;
-
-            public SerializableVector3(float x, float y, float z)
-            {
-                this.x = x;
-                this.y = y;
-                this.z = z;
-            }
-
-            public SerializableVector3(Vector3 v)
-            {
-                x = v.x;
-                y = v.y;
-                z = v.z;
-            }
-
-            public static implicit operator Vector3(SerializableVector3 v)
-            {
-                return new Vector3(v.x, v.y, v.z);
-            }
-
-            public static implicit operator SerializableVector3(Vector3 v)
-            {
-                return new SerializableVector3(v);
-            }
-        }
-
-        /// <summary>
-        /// Helper struct to enable serialization of Unity Quaternion.
-        /// </summary>
-        [Serializable]
-        public struct SerializableQuaternion
-        {
-            public float w;
-            public float x;
-            public float y;
-            public float z;
-
-            public SerializableQuaternion(float w, float x, float y, float z)
-            {
-                this.w = w;
-                this.x = x;
-                this.y = y;
-                this.z = z;
-            }
-
-            public SerializableQuaternion(Quaternion q)
-            {
-                w = q.w;
-                x = q.x;
-                y = q.y;
-                z = q.z;
-            }
-
-            public static implicit operator Quaternion(SerializableQuaternion q)
-            {
-                return new Quaternion(q.w, q.x, q.y, q.z);
-            }
-
-            public static implicit operator SerializableQuaternion(Quaternion q)
-            {
-                return new SerializableQuaternion(q);
-            }
-        }
-
         public bool valid = false;
         public ulong ID;
-        [NonSerializedAttribute]
         public Vector3[] jointPositions3D;
-        [NonSerializedAttribute]
         public Vector3[] facePositions3D;
         public Vector3 faceOrientationYPR;
         public Quaternion faceOrientation;
@@ -359,7 +279,6 @@ namespace RoomAliveToolkit
         public byte handLeftState;
         public byte handRightState;
 
-        [NonSerializedAttribute]
         private int mergeCount = 0;
 
         public RATKinectSkeleton()
@@ -367,82 +286,6 @@ namespace RoomAliveToolkit
             this.jointPositions3D = new Vector3[JOINT_COUNT];
             this.jointStates = new TrackingState[JOINT_COUNT];
             this.facePositions3D = new Vector3[FACE_POSITION_COUNT];
-        }
-
-        private Vector3 Vec3(SerializableVector3 v)
-        {
-            return new Vector3(v.x,v.y,v.z);
-        }
-
-        protected RATKinectSkeleton(SerializationInfo info, StreamingContext context) : this()
-        {
-            try{
-                valid = info.GetBoolean("valid");
-                ID = info.GetUInt64("ID");
-                handLeftConfidence = info.GetByte("HandLeftConfidence");
-                handRightConfidence = info.GetByte("HandRightConfidence");
-                handLeftState = info.GetByte("HandLeftState");
-                handRightState = info.GetByte("HandRightState");
-
-                // Deserialize joint positions and orientations
-                SerializableVector3[] jointPositions3D = (SerializableVector3[])info.GetValue("JointPositions3D", typeof(SerializableVector3[]));
-
-                for (int jointIndex = 0; jointIndex < JOINT_COUNT; ++jointIndex)
-                {
-                    this.jointPositions3D[jointIndex] = (Vector3)jointPositions3D[jointIndex];
-                }
-
-                this.jointStates = (TrackingState[])info.GetValue("JointStates", typeof(RATKinectSkeleton.TrackingState[]));
-
-                SerializableVector3[] FacePositions3D = (SerializableVector3[])info.GetValue("FacePositions3D", typeof(SerializableVector3[]));
-                for (int faceIndex = 0; faceIndex < FACE_POSITION_COUNT; ++faceIndex)
-                {
-                    this.facePositions3D[faceIndex] = FacePositions3D.Length > faceIndex ? (Vector3)FacePositions3D[faceIndex] : Vector3.zero;
-                }
-
-                this.faceOrientationYPR = Vec3((SerializableVector3)info.GetValue("FaceOrientationYPR", typeof(SerializableVector3)));
-                faceOrientation = Quaternion.Euler(faceOrientationYPR);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(ex);
-            }
-        }
-
-        [SecurityPermissionAttribute(SecurityAction.Demand, SerializationFormatter = true)]
-        public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
-        {
-            try { 
-                info.AddValue("valid", valid);
-                info.AddValue("ID", ID);
-                info.AddValue("HandLeftConfidence", handLeftConfidence);
-                info.AddValue("HandRightConfidence", handRightConfidence);
-                info.AddValue("HandLeftState", handLeftState);
-                info.AddValue("HandRightState", handRightState);
-
-                // Serialize joint positions and orientations
-                SerializableVector3[] JointPositions3D = new SerializableVector3[JOINT_COUNT];
-
-                for (int jointIndex = 0; jointIndex < JOINT_COUNT; ++jointIndex)
-                {
-                    JointPositions3D[jointIndex] = (SerializableVector3)this.jointPositions3D[jointIndex];
-                }
-                info.AddValue("JointPositions3D", JointPositions3D);
-                info.AddValue("JointStates", jointStates);
-
-                SerializableVector3[] FacePositions3D = new SerializableVector3[FACE_POSITION_COUNT];
-                for (int faceIndex = 0; faceIndex < FACE_POSITION_COUNT; ++faceIndex)
-                {
-                    FacePositions3D[faceIndex] = this.facePositions3D.Length > faceIndex ? (SerializableVector3)this.facePositions3D[faceIndex] : (SerializableVector3)Vector3.zero;
-                }
-                info.AddValue("FacePositions3D", FacePositions3D);
-
-                info.AddValue("FaceOrientationYPR", new SerializableVector3(faceOrientationYPR));
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(ex);
-            }
         }
 
         public void MergeSkeleton(RATKinectSkeleton srcData,Matrix4x4 transform)

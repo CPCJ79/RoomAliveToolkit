@@ -77,12 +77,7 @@ public class RATDynamicMask : MonoBehaviour {
     protected bool CheckSupport()
     {
         isSupported = true;
-
-        if (!SystemInfo.supportsImageEffects)
-        {
-            NotSupported();
-            return false;
-        }
+        // SystemInfo.supportsImageEffects was removed in Unity 2019+; image effects are always supported.
         return true;
     }
 

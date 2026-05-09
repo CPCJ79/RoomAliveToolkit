@@ -1,6 +1,8 @@
 ﻿using UnityEngine;
 using System.Collections;
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 
 namespace RoomAliveToolkit
 {
@@ -36,8 +38,12 @@ namespace RoomAliveToolkit
 
         public void LoadDefault3DModels()
         {
+#if UNITY_EDITOR
             kinectModel = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/RoomAliveToolkit/Models/Kinect.obj");
             projectorModel = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/RoomAliveToolkit/Models/Projector.obj");
+#else
+            Debug.LogWarning("LoadDefault3DModels is only available in the Unity Editor.");
+#endif
         }
 
         public void BuildSceneComponents()

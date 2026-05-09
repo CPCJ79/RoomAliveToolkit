@@ -78,9 +78,8 @@ namespace RoomAliveToolkit
     {
 
     }
-    [CustomPropertyDrawer(typeof(ReadOnlyAttribute))]
-
 #if UNITY_EDITOR
+    [CustomPropertyDrawer(typeof(ReadOnlyAttribute))]
     public class ReadOnlyDrawer : PropertyDrawer
     {
         public override float GetPropertyHeight(SerializedProperty property,

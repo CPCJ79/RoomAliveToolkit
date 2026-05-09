@@ -1,7 +1,8 @@
-﻿using System;
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
-using System.Windows.Media.Imaging;
 using RoomAliveToolkit;
 
 namespace KinectV2Server
@@ -25,49 +26,30 @@ namespace KinectV2Server
         }
 
 
-        public static void SaveColorToJPEG(string filePath, ARGBImage rgbImage)
+        public static unsafe void SaveColorToJPEG(string filePath, ARGBImage rgbImage)
         {
-
-            BitmapSource srcImage = BitmapSource.Create(
-               rgbImage.Width,
-               rgbImage.Height,
-               96,
-               96,
-               System.Windows.Media.PixelFormats.Bgra32,
-               null,
-               rgbImage.DataIntPtr,
-               rgbImage.Width * rgbImage.Height * 4,
-               rgbImage.Width * 4);
-
-            // Convert the color frame to RGB24 pixel format
-            FormatConvertedBitmap image = new FormatConvertedBitmap();
-            image.BeginInit();
-            image.Source = srcImage;
-            image.DestinationFormat = System.Windows.Media.PixelFormats.Rgb24;
-            image.EndInit();
-
-            using (MemoryStream memoryStream = new MemoryStream())
+            using (var bmp = new Bitmap(rgbImage.Width, rgbImage.Height, PixelFormat.Format32bppArgb))
             {
-                JpegBitmapEncoder encoder = new JpegBitmapEncoder();
-
-                // Add the frame to the encoder.
-                encoder.Frames.Add(BitmapFrame.Create(image));
-                encoder.Save(memoryStream);
-
-                File.WriteAllBytes(filePath, memoryStream.ToArray());
+                var bmpData = bmp.LockBits(
+                    new Rectangle(0, 0, rgbImage.Width, rgbImage.Height),
+                    ImageLockMode.WriteOnly,
+                    PixelFormat.Format32bppArgb);
+                Win32.CopyMemory(bmpData.Scan0, rgbImage.DataIntPtr, (UIntPtr)(rgbImage.Width * rgbImage.Height * 4));
+                bmp.UnlockBits(bmpData);
+                bmp.Save(filePath, ImageFormat.Jpeg);
             }
         }
 
 
         /// <summary>
-        /// 
+        ///
         /// </summary>
-        /// <param name="directory"></param>
         /// <param name="objPath"></param>
+        /// <param name="calibration"></param>
         /// <param name="depthImage"></param>
-        /// <param name="rgbImage"></param>
+        /// <param name="colorImageFileName"></param>
         /// <param name="pose">Optional transformation pose (4x4 Matrix). Supply Identity by default</param>
-        public static void Save(string objPath, Kinect2Calibration calibration, ShortImage depthImage, string colorImageFileName, Matrix pose)
+        public static void Save(string objPath, Kinect2Calibration calibration, ShortImage depthImage, string colorImageFileName, RoomAliveToolkit.Matrix pose)
         {
             var objFilename = Path.GetFileNameWithoutExtension(objPath);
             var objDirectory = Path.GetDirectoryName(objPath);
@@ -76,7 +58,6 @@ namespace KinectV2Server
                 Directory.CreateDirectory(objDirectory);
 
             //copy the background color image to file
-            //SaveColorToJPEG(objDirectory + "/" + objFilename + ".jpg", rgbImage);
             if (File.Exists(colorImageFileName))
             {
                 File.Copy(colorImageFileName, objDirectory + "/" + objFilename + ".jpg", true);
@@ -101,8 +82,6 @@ namespace KinectV2Server
             var mtlFileWriter = new StreamWriter(objDirectory + "/" + objFilename + ".mtl");
             streamWriter.WriteLine("mtllib " + objFilename + ".mtl");
             uint nextVertexIndex = 1;
-            //var depthImage = new FloatImage(Kinect2Calibration.depthImageWidth, Kinect2Calibration.depthImageHeight);
-
 
             mtlFileWriter.WriteLine("newmtl camera0");
             mtlFileWriter.WriteLine("Ka 1.000000 1.000000 1.000000");
@@ -116,16 +95,11 @@ namespace KinectV2Server
 
             streamWriter.WriteLine("usemtl camera0");
 
-            // load depth image
-            //string cameraDirectory = directory + "/camera" + camera.name;
-            //depthImage.LoadFromFile(cameraDirectory + "/mean.bin");
-
-            //var calibration = camera.calibration;
             var depthFrameToCameraSpaceTable = calibration.ComputeDepthFrameToCameraSpaceTable();
             var vertices = new Vertex[Kinect2Calibration.depthImageWidth * Kinect2Calibration.depthImageHeight];
-            var colorCamera = new Matrix(4, 1);
-            var depthCamera = new Matrix(4, 1);
-            var world = new Matrix(4, 1);
+            var colorCamera = new RoomAliveToolkit.Matrix(4, 1);
+            var depthCamera = new RoomAliveToolkit.Matrix(4, 1);
+            var world = new RoomAliveToolkit.Matrix(4, 1);
 
             for (int y = 0; y < Kinect2Calibration.depthImageHeight; y++)
                 for (int x = 0; x < Kinect2Calibration.depthImageWidth; x++)
@@ -141,7 +115,6 @@ namespace KinectV2Server
 
                     // world coordinates
                     world.Mult(pose, depthCamera);
-                    //world.Scale(1.0 / world[3]); not necessary for this transform
 
                     // convert to color camera space
                     colorCamera.Mult(calibration.depthToColorTransform, depthCamera);
@@ -209,7 +182,7 @@ namespace KinectV2Server
                         offseti += 3;
                     }
                 }
-            
+
             streamWriter.Close();
             mtlFileWriter.Close();
         }

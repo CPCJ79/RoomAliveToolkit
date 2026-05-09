@@ -82,6 +82,16 @@ namespace RoomAliveToolkit
             //}
         }
         
+        public void Copy(IntPtr dataPtr)
+        {
+            Win32.CopyMemory(dataIntPtr, dataPtr, (UIntPtr)(width * height * bytesPerPixel));
+        }
+
+        public void CopyTo(IntPtr dataPtr)
+        {
+            Win32.CopyMemory(dataPtr, dataIntPtr, (UIntPtr)(width * height * bytesPerPixel));
+        }
+
         public void Copy(UnmanagedImage a)
         {
             Win32.CopyMemory(dataIntPtr, a.dataIntPtr, (UIntPtr)(width * height * bytesPerPixel));
@@ -100,6 +110,25 @@ namespace RoomAliveToolkit
         public int Height
         {
             get { return height; }
+        }
+
+        public byte[] ToByteArray()
+        {
+            byte[] arr = new byte[width * height * bytesPerPixel];
+            fixed (byte* p = arr)
+            {
+                CopyTo((IntPtr)p);
+            }
+            return arr;
+        }
+
+        public void FromByteArray(byte[] arr, int startIndex = 0)
+        {
+            fixed (byte* p = arr)
+            {
+                byte* p1 = p + startIndex;
+                Win32.CopyMemory(dataIntPtr, (IntPtr)p1, (UIntPtr)(width * height * bytesPerPixel));
+            }
         }
 
         public void SaveToFile(string filename)

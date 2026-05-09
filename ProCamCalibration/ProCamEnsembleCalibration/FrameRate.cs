@@ -5,7 +5,7 @@
 using System;
 using System.Diagnostics;
 
-namespace RoomAliveToolkit.Images
+namespace RoomAliveToolkit
 {
     public class FrameRate
     {

@@ -135,6 +135,24 @@ namespace RoomAliveToolkit
             }
         }
 
+        public void CopyShortImageForGrayscaleDisplay(ShortImage source, int maxValue)
+        {
+            ushort* pSrc = source.Data(0, 0);
+            ARGB32* pOut = data;
+            float scale = 255.0f / maxValue;
+            for (int i = 0; i < width * height; i++)
+            {
+                int val = (int)(*pSrc++ * scale);
+                if (val > 255) val = 255;
+                byte b = (byte)val;
+                pOut->A = 255;
+                pOut->R = b;
+                pOut->G = b;
+                pOut->B = b;
+                pOut++;
+            }
+        }
+
         public void InverseRGB()
         {
             ARGB32* p = data;
